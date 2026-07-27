@@ -28,12 +28,35 @@
   input { font-family: inherit; }
 </style>
 
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin onerror="showFatal('Impossible de charger React depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin onerror="showFatal('Impossible de charger React-DOM depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin onerror="showFatal('Impossible de charger Babel depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
 </head>
 <body>
+<div id="fallback" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;color:#F3EAD9;font-family:sans-serif;">
+  <div style="font-size:18px;font-weight:600;">Chargement de TOTO…</div>
+  <div id="fallback-detail" style="font-size:13px;color:#9C9186;max-width:340px;"></div>
+</div>
 <div id="root"></div>
+<script>
+  var fatalShown = false;
+  function showFatal(msg) {
+    if (fatalShown) return;
+    fatalShown = true;
+    var fb = document.getElementById("fallback");
+    var detail = document.getElementById("fallback-detail");
+    fb.querySelector("div").textContent = "⚠️ L'appli n'a pas pu démarrer";
+    detail.textContent = msg;
+  }
+  window.addEventListener("error", function (e) {
+    showFatal("Erreur JavaScript : " + (e.message || "erreur inconnue") + (e.filename ? " (" + e.filename.split("/").pop() + ":" + e.lineno + ")" : ""));
+  });
+  setTimeout(function () {
+    if (!window.__totoMounted) {
+      showFatal("Le chargement prend trop de temps — probablement un blocage réseau vers unpkg.com (CDN de React).");
+    }
+  }, 8000);
+</script>
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo, useRef } = React;
@@ -520,7 +543,14 @@ function ManageView({ products, categories, editing, form, setForm, openNewProdu
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  window.__totoMounted = true;
+  const fb = document.getElementById("fallback");
+  if (fb) fb.style.display = "none";
+} catch (e) {
+  showFatal("Erreur au démarrage : " + e.message);
+}
 </script>
 </body>
 </html>

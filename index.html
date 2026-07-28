@@ -49,6 +49,9 @@
     detail.textContent = msg;
   }
   window.addEventListener("error", function (e) {
+    var fromOwnScript = e.filename && (e.filename.indexOf(window.location.origin) === 0 || e.filename.indexOf("unpkg.com") !== -1);
+    var looksLikeExtension = !e.filename || e.filename.indexOf("extension://") !== -1 || e.filename === "";
+    if (looksLikeExtension && !fromOwnScript) return; // ignore erreurs d'extensions navigateur (Grammarly, etc.)
     showFatal("Erreur JavaScript : " + (e.message || "erreur inconnue") + (e.filename ? " (" + e.filename.split("/").pop() + ":" + e.lineno + ")" : ""));
   });
   setTimeout(function () {

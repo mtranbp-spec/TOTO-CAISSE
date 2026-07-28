@@ -30,7 +30,6 @@
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin onerror="showFatal('Impossible de charger React depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin onerror="showFatal('Impossible de charger React-DOM depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin onerror="showFatal('Impossible de charger Babel depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
 </head>
 <body>
 <div id="fallback" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;color:#F3EAD9;font-family:sans-serif;">
@@ -61,9 +60,9 @@
   }, 8000);
 </script>
 
-<script type="text/babel" data-presets="react">
+<script>
+"use strict";
 const { useState, useEffect, useMemo, useRef } = React;
-
 /* ---------- Design tokens (identité TOTO) ---------- */
 const BG = "#161311";
 const PANEL = "#221D1A";
@@ -74,486 +73,400 @@ const TEXT_MUTED = "#9C9186";
 const ACCENT = "#C2352A";
 const ACCENT_GREEN = "#3EA283";
 const GOLD = "#E8B44A";
-
 const CATEGORY_COLORS = { "Friture": ACCENT, "Plats chauds": ACCENT_GREEN };
 const FALLBACK_COLORS = [ACCENT, ACCENT_GREEN, GOLD, "#4B7BE1", "#B85AE1"];
 function catColor(cat, cats) {
-  if (CATEGORY_COLORS[cat]) return CATEGORY_COLORS[cat];
-  const idx = cats.indexOf(cat) % FALLBACK_COLORS.length;
-  return FALLBACK_COLORS[idx < 0 ? 0 : idx];
+    if (CATEGORY_COLORS[cat])
+        return CATEGORY_COLORS[cat];
+    const idx = cats.indexOf(cat) % FALLBACK_COLORS.length;
+    return FALLBACK_COLORS[idx < 0 ? 0 : idx];
 }
-
 const DEFAULT_PRODUCTS = [
-  { id: "p1", name: "Nem", price: 150, cost: 60, category: "Friture" },
-  { id: "p2", name: "Nem crevette", price: 200, cost: 90, category: "Friture" },
-  { id: "p3", name: "Samoussa poulet", price: 200, cost: 90, category: "Friture" },
-  { id: "p4", name: "Samoussa bœuf", price: 200, cost: 90, category: "Friture" },
-  { id: "p5", name: "Beignet crevette", price: 250, cost: 110, category: "Friture" },
-  { id: "p6", name: "Raviolis vapeur", price: 250, cost: 110, category: "Friture" },
-  { id: "p7", name: "Poulet au citron", price: 1200, cost: 500, category: "Plats chauds" },
-  { id: "p8", name: "Porc au sucre", price: 1200, cost: 500, category: "Plats chauds" },
-  { id: "p9", name: "Bœuf sauce huître", price: 1300, cost: 550, category: "Plats chauds" },
-  { id: "p10", name: "Riz cantonais", price: 700, cost: 280, category: "Plats chauds" },
-  { id: "p11", name: "Nouilles sautées", price: 800, cost: 320, category: "Plats chauds" },
-  { id: "p12", name: "Riz vapeur", price: 250, cost: 80, category: "Plats chauds" },
+    { id: "p1", name: "Nem", price: 150, cost: 60, category: "Friture" },
+    { id: "p2", name: "Nem crevette", price: 200, cost: 90, category: "Friture" },
+    { id: "p3", name: "Samoussa poulet", price: 200, cost: 90, category: "Friture" },
+    { id: "p4", name: "Samoussa bœuf", price: 200, cost: 90, category: "Friture" },
+    { id: "p5", name: "Beignet crevette", price: 250, cost: 110, category: "Friture" },
+    { id: "p6", name: "Raviolis vapeur", price: 250, cost: 110, category: "Friture" },
+    { id: "p7", name: "Poulet au citron", price: 1200, cost: 500, category: "Plats chauds" },
+    { id: "p8", name: "Porc au sucre", price: 1200, cost: 500, category: "Plats chauds" },
+    { id: "p9", name: "Bœuf sauce huître", price: 1300, cost: 550, category: "Plats chauds" },
+    { id: "p10", name: "Riz cantonais", price: 700, cost: 280, category: "Plats chauds" },
+    { id: "p11", name: "Nouilles sautées", price: 800, cost: 320, category: "Plats chauds" },
+    { id: "p12", name: "Riz vapeur", price: 250, cost: 80, category: "Plats chauds" },
 ];
-
 /* ---------- Helpers ---------- */
 function fmt(n) { return Math.round(n).toLocaleString("fr-FR", { maximumFractionDigits: 0 }) + " F"; }
 function todayKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function monthKeyOf(dateKey) { return dateKey.slice(0, 7); }
 function yearKeyOf(dateKey) { return dateKey.slice(0, 4); }
 function addDaysKey(dateKey, delta) {
-  const [y, m, d] = dateKey.split("-").map(Number);
-  const dt = new Date(y, m - 1, d + delta);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    const [y, m, d] = dateKey.split("-").map(Number);
+    const dt = new Date(y, m - 1, d + delta);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 function shortDayLabel(dateKey) {
-  const [y, m, d] = dateKey.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
+    const [y, m, d] = dateKey.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 }
 function monthLabel(monthKey) {
-  const [y, m] = monthKey.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+    const [y, m] = monthKey.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
 }
-
 /* ---------- Sauvegarde locale (remplace window.storage) ---------- */
 const store = {
-  get(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch (e) { return fallback; }
-  },
-  set(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch (e) { return false; }
-  },
+    get(key, fallback) {
+        try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : fallback;
+        }
+        catch (e) {
+            return fallback;
+        }
+    },
+    set(key, value) {
+        try {
+            localStorage.setItem(key, JSON.stringify(value));
+            return true;
+        }
+        catch (e) {
+            return false;
+        }
+    },
 };
-
 /* ---------- Icônes (SVG simples, pas de dépendance) ---------- */
 const Icon = {
-  Plus: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke={p.color||"#fff"} strokeWidth="2.5" strokeLinecap="round"/></svg>,
-  Minus: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke={p.color||"#fff"} strokeWidth="2.5" strokeLinecap="round"/></svg>,
-  Trash: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0 1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" stroke={p.color||"#fff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Gear: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke={p.color||"#fff"} strokeWidth="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke={p.color||"#fff"} strokeWidth="1.6"/></svg>,
-  List: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" stroke={p.color||"#fff"} strokeWidth="2" strokeLinecap="round"/></svg>,
-  Trend: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><path d="M23 6l-9.5 9.5-5-5L1 18" stroke={p.color||"#fff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M17 6h6v6" stroke={p.color||"#fff"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Bar: (p) => <svg width={p.size||14} height={p.size||14} viewBox="0 0 24 24" fill="none"><path d="M12 20V10M18 20V4M6 20v-4" stroke={p.color||"#fff"} strokeWidth="2.2" strokeLinecap="round"/></svg>,
-  X: (p) => <svg width={p.size||18} height={p.size||18} viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke={p.color||"#fff"} strokeWidth="2" strokeLinecap="round"/></svg>,
+    Plus: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M12 5v14M5 12h14", stroke: p.color || "#fff", strokeWidth: "2.5", strokeLinecap: "round" })),
+    Minus: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M5 12h14", stroke: p.color || "#fff", strokeWidth: "2.5", strokeLinecap: "round" })),
+    Trash: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0 1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
+    Gear: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("circle", { cx: "12", cy: "12", r: "3", stroke: p.color || "#fff", strokeWidth: "2" }),
+        React.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z", stroke: p.color || "#fff", strokeWidth: "1.6" })),
+    List: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Trend: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M23 6l-9.5 9.5-5-5L1 18", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
+        React.createElement("path", { d: "M17 6h6v6", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
+    Bar: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M12 20V10M18 20V4M6 20v-4", stroke: p.color || "#fff", strokeWidth: "2.2", strokeLinecap: "round" })),
+    X: (p) => React.createElement("svg", { width: p.size || 18, height: p.size || 18, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M18 6 6 18M6 6l12 12", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
 };
-
 /* ---------- App ---------- */
 function App() {
-  const [products, setProducts] = useState(() => store.get("pos_products", DEFAULT_PRODUCTS));
-  const [sales, setSales] = useState(() => store.get("pos_sales", []));
-  const [cart, setCart] = useState([]);
-  const [activeCategory, setActiveCategory] = useState("Toutes");
-  const [view, setView] = useState("pos");
-  const [statsPeriod, setStatsPeriod] = useState("jour");
-  const [toast, setToast] = useState(null);
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: "", price: "", cost: "", category: "" });
-  const toastTimer = useRef(null);
-
-  useEffect(() => {
-    if (!localStorage.getItem("pos_products")) store.set("pos_products", DEFAULT_PRODUCTS);
-  }, []);
-
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    const [products, setProducts] = useState(() => store.get("pos_products", DEFAULT_PRODUCTS));
+    const [sales, setSales] = useState(() => store.get("pos_sales", []));
+    const [cart, setCart] = useState([]);
+    const [activeCategory, setActiveCategory] = useState("Toutes");
+    const [view, setView] = useState("pos");
+    const [statsPeriod, setStatsPeriod] = useState("jour");
+    const [toast, setToast] = useState(null);
+    const [editing, setEditing] = useState(null);
+    const [form, setForm] = useState({ name: "", price: "", cost: "", category: "" });
+    const toastTimer = useRef(null);
+    useEffect(() => {
+        if (!localStorage.getItem("pos_products"))
+            store.set("pos_products", DEFAULT_PRODUCTS);
+    }, []);
+    useEffect(() => {
+        if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.register("service-worker.js").catch(() => { });
+        }
+    }, []);
+    function showToast(msg) {
+        setToast(msg);
+        if (toastTimer.current)
+            clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 2200);
     }
-  }, []);
-
-  function showToast(msg) {
-    setToast(msg);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2200);
-  }
-
-  const categories = useMemo(() => Array.from(new Set(products.map((p) => p.category))), [products]);
-  const visibleProducts = useMemo(
-    () => (activeCategory === "Toutes" ? products : products.filter((p) => p.category === activeCategory)),
-    [products, activeCategory]
-  );
-  const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
-  const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
-
-  const todaysCA = useMemo(() => {
-    const tk = todayKey();
-    return sales.filter((s) => s.dateKey === tk).reduce((sum, s) => sum + s.total, 0);
-  }, [sales]);
-
-  const costLookup = useMemo(() => {
-    const m = {};
-    products.forEach((p) => { m[p.id] = p.cost || 0; });
-    return m;
-  }, [products]);
-
-  function marginOfSale(sale) {
-    return sale.items.reduce((sum, it) => sum + (it.price - (costLookup[it.id] || 0)) * it.qty, 0);
-  }
-
-  const statsData = useMemo(() => {
-    const tk = todayKey();
-    if (statsPeriod === "jour") {
-      const currentSales = sales.filter((s) => s.dateKey === tk);
-      const trendKeys = [];
-      for (let i = 13; i >= 0; i--) trendKeys.push(addDaysKey(tk, -i));
-      const trend = trendKeys.map((k) => ({
-        key: k, label: shortDayLabel(k),
-        ca: sales.filter((s) => s.dateKey === k).reduce((sum, s) => sum + s.total, 0),
-      }));
-      return { currentSales, trend, currentLabel: "Aujourd'hui" };
+    const categories = useMemo(() => Array.from(new Set(products.map((p) => p.category))), [products]);
+    const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? products : products.filter((p) => p.category === activeCategory)), [products, activeCategory]);
+    const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
+    const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
+    const todaysCA = useMemo(() => {
+        const tk = todayKey();
+        return sales.filter((s) => s.dateKey === tk).reduce((sum, s) => sum + s.total, 0);
+    }, [sales]);
+    const costLookup = useMemo(() => {
+        const m = {};
+        products.forEach((p) => { m[p.id] = p.cost || 0; });
+        return m;
+    }, [products]);
+    function marginOfSale(sale) {
+        return sale.items.reduce((sum, it) => sum + (it.price - (costLookup[it.id] || 0)) * it.qty, 0);
     }
-    if (statsPeriod === "mois") {
-      const currentKey = monthKeyOf(tk);
-      const currentSales = sales.filter((s) => monthKeyOf(s.dateKey) === currentKey);
-      const [cy, cm] = currentKey.split("-").map(Number);
-      const trendKeys = [];
-      for (let i = 11; i >= 0; i--) {
-        const dt = new Date(cy, cm - 1 - i, 1);
-        trendKeys.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`);
-      }
-      const trend = trendKeys.map((k) => ({
-        key: k, label: monthLabel(k),
-        ca: sales.filter((s) => monthKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0),
-      }));
-      return { currentSales, trend, currentLabel: "Ce mois-ci" };
+    const statsData = useMemo(() => {
+        const tk = todayKey();
+        if (statsPeriod === "jour") {
+            const currentSales = sales.filter((s) => s.dateKey === tk);
+            const trendKeys = [];
+            for (let i = 13; i >= 0; i--)
+                trendKeys.push(addDaysKey(tk, -i));
+            const trend = trendKeys.map((k) => ({
+                key: k, label: shortDayLabel(k),
+                ca: sales.filter((s) => s.dateKey === k).reduce((sum, s) => sum + s.total, 0),
+            }));
+            return { currentSales, trend, currentLabel: "Aujourd'hui" };
+        }
+        if (statsPeriod === "mois") {
+            const currentKey = monthKeyOf(tk);
+            const currentSales = sales.filter((s) => monthKeyOf(s.dateKey) === currentKey);
+            const [cy, cm] = currentKey.split("-").map(Number);
+            const trendKeys = [];
+            for (let i = 11; i >= 0; i--) {
+                const dt = new Date(cy, cm - 1 - i, 1);
+                trendKeys.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`);
+            }
+            const trend = trendKeys.map((k) => ({
+                key: k, label: monthLabel(k),
+                ca: sales.filter((s) => monthKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0),
+            }));
+            return { currentSales, trend, currentLabel: "Ce mois-ci" };
+        }
+        const currentKey = yearKeyOf(tk);
+        const currentSales = sales.filter((s) => yearKeyOf(s.dateKey) === currentKey);
+        const years = Array.from(new Set(sales.map((s) => yearKeyOf(s.dateKey))));
+        if (!years.includes(currentKey))
+            years.push(currentKey);
+        years.sort();
+        const trend = years.map((k) => ({
+            key: k, label: k,
+            ca: sales.filter((s) => yearKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0),
+        }));
+        return { currentSales, trend, currentLabel: "Cette année" };
+    }, [sales, statsPeriod]);
+    const periodStats = useMemo(() => {
+        const { currentSales } = statsData;
+        const ca = currentSales.reduce((sum, s) => sum + s.total, 0);
+        const marge = currentSales.reduce((sum, s) => sum + marginOfSale(s), 0);
+        const nbVentes = currentSales.length;
+        const panierMoyen = nbVentes > 0 ? ca / nbVentes : 0;
+        const byProduct = {};
+        currentSales.forEach((s) => {
+            s.items.forEach((it) => {
+                if (!byProduct[it.id])
+                    byProduct[it.id] = { name: it.name, qty: 0, ca: 0 };
+                byProduct[it.id].qty += it.qty;
+                byProduct[it.id].ca += it.price * it.qty;
+            });
+        });
+        const topProduits = Object.values(byProduct).sort((a, b) => b.qty - a.qty).slice(0, 6);
+        return { ca, marge, nbVentes, panierMoyen, topProduits };
+    }, [statsData, costLookup]);
+    function addToCart(product) {
+        setCart((prev) => {
+            const existing = prev.find((it) => it.id === product.id);
+            if (existing)
+                return prev.map((it) => (it.id === product.id ? { ...it, qty: it.qty + 1 } : it));
+            return [...prev, { id: product.id, name: product.name, price: product.price, qty: 1 }];
+        });
     }
-    const currentKey = yearKeyOf(tk);
-    const currentSales = sales.filter((s) => yearKeyOf(s.dateKey) === currentKey);
-    const years = Array.from(new Set(sales.map((s) => yearKeyOf(s.dateKey))));
-    if (!years.includes(currentKey)) years.push(currentKey);
-    years.sort();
-    const trend = years.map((k) => ({
-      key: k, label: k,
-      ca: sales.filter((s) => yearKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0),
-    }));
-    return { currentSales, trend, currentLabel: "Cette année" };
-  }, [sales, statsPeriod]);
-
-  const periodStats = useMemo(() => {
-    const { currentSales } = statsData;
-    const ca = currentSales.reduce((sum, s) => sum + s.total, 0);
-    const marge = currentSales.reduce((sum, s) => sum + marginOfSale(s), 0);
-    const nbVentes = currentSales.length;
-    const panierMoyen = nbVentes > 0 ? ca / nbVentes : 0;
-    const byProduct = {};
-    currentSales.forEach((s) => {
-      s.items.forEach((it) => {
-        if (!byProduct[it.id]) byProduct[it.id] = { name: it.name, qty: 0, ca: 0 };
-        byProduct[it.id].qty += it.qty;
-        byProduct[it.id].ca += it.price * it.qty;
-      });
-    });
-    const topProduits = Object.values(byProduct).sort((a, b) => b.qty - a.qty).slice(0, 6);
-    return { ca, marge, nbVentes, panierMoyen, topProduits };
-  }, [statsData, costLookup]);
-
-  function addToCart(product) {
-    setCart((prev) => {
-      const existing = prev.find((it) => it.id === product.id);
-      if (existing) return prev.map((it) => (it.id === product.id ? { ...it, qty: it.qty + 1 } : it));
-      return [...prev, { id: product.id, name: product.name, price: product.price, qty: 1 }];
-    });
-  }
-  function changeQty(id, delta) {
-    setCart((prev) => prev.map((it) => (it.id === id ? { ...it, qty: it.qty + delta } : it)).filter((it) => it.qty > 0));
-  }
-  function removeFromCart(id) { setCart((prev) => prev.filter((it) => it.id !== id)); }
-  function clearCart() { setCart([]); }
-
-  function checkout() {
-    if (cart.length === 0) return;
-    const now = new Date();
-    const sale = {
-      id: "s" + now.getTime(),
-      timestamp: now.toISOString(),
-      dateKey: todayKey(),
-      items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, qty: it.qty })),
-      total: cartTotal,
-    };
-    const next = [...sales, sale];
-    setSales(next);
-    setCart([]);
-    store.set("pos_sales", next);
-    showToast(`Encaissé : ${fmt(sale.total)}`);
-  }
-
-  function saveProducts(next) { setProducts(next); store.set("pos_products", next); }
-
-  function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture" }); setEditing("new"); }
-  function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category }); setEditing(p.id); }
-
-  function submitProductForm() {
-    const priceNum = parseFloat(String(form.price).replace(",", "."));
-    const costNum = parseFloat(String(form.cost).replace(",", ".")) || 0;
-    if (!form.name.trim() || isNaN(priceNum) || priceNum < 0 || !form.category.trim()) {
-      showToast("Vérifie le nom, le prix et la catégorie.");
-      return;
+    function changeQty(id, delta) {
+        setCart((prev) => prev.map((it) => (it.id === id ? { ...it, qty: it.qty + delta } : it)).filter((it) => it.qty > 0));
     }
-    if (editing === "new") {
-      saveProducts([...products, { id: "p" + Date.now(), name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() }]);
-      showToast("Produit ajouté");
-    } else {
-      saveProducts(products.map((p) => p.id === editing ? { ...p, name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() } : p));
-      showToast("Produit modifié");
+    function removeFromCart(id) { setCart((prev) => prev.filter((it) => it.id !== id)); }
+    function clearCart() { setCart([]); }
+    function checkout() {
+        if (cart.length === 0)
+            return;
+        const now = new Date();
+        const sale = {
+            id: "s" + now.getTime(),
+            timestamp: now.toISOString(),
+            dateKey: todayKey(),
+            items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, qty: it.qty })),
+            total: cartTotal,
+        };
+        const next = [...sales, sale];
+        setSales(next);
+        setCart([]);
+        store.set("pos_sales", next);
+        showToast(`Encaissé : ${fmt(sale.total)}`);
     }
-    setEditing(null);
-  }
-  function deleteProduct(id) { saveProducts(products.filter((p) => p.id !== id)); setEditing(null); showToast("Produit supprimé"); }
-
-  return (
-    <div style={{ background: BG, minHeight: "100vh" }}>
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <svg width="34" height="34" viewBox="0 0 512 512" fill="none">
-            <circle cx="256" cy="256" r="200" stroke={ACCENT} strokeWidth="18" />
-            <path d="M170 210 C170 270 208 300 256 300 C304 300 342 270 342 210 Z" fill={ACCENT} />
-            <ellipse cx="256" cy="300" rx="30" ry="8" fill={ACCENT} />
-            <ellipse cx="256" cy="200" rx="86" ry="30" fill={TEXT} />
-            <line x1="290" y1="185" x2="340" y2="95" stroke={ACCENT} strokeWidth="10" strokeLinecap="round" />
-            <line x1="305" y1="192" x2="360" y2="105" stroke={ACCENT} strokeWidth="10" strokeLinecap="round" />
-          </svg>
-          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
-            <span className="font-display" style={{ fontSize: 20, color: TEXT }}>TOTO</span>
-            <span style={{ fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT }}>Since 2004</span>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: PANEL }}>
-            <Icon.Trend size={16} color={GOLD} />
-            <span className="tabnum" style={{ fontSize: 14, fontWeight: 600, color: GOLD }}>{fmt(todaysCA)}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", borderRadius: 999, padding: 4, background: PANEL }}>
-            <TabButton active={view === "pos"} onClick={() => setView("pos")}>Caisse</TabButton>
-            <TabButton active={view === "stats"} onClick={() => setView("stats")} icon={<Icon.Bar size={13} />}>Stats</TabButton>
-            <TabButton active={view === "manage"} onClick={() => setView("manage")} icon={<Icon.Gear size={13} />}>Produits</TabButton>
-          </div>
-        </div>
-      </div>
-
-      {view === "stats" ? (
-        <StatsView period={statsPeriod} setPeriod={setStatsPeriod} currentLabel={statsData.currentLabel} trend={statsData.trend} stats={periodStats} />
-      ) : view === "manage" ? (
-        <ManageView products={products} categories={categories} editing={editing} form={form} setForm={setForm}
-          openNewProduct={openNewProduct} openEditProduct={openEditProduct} submitProductForm={submitProductForm}
-          deleteProduct={deleteProduct} closeForm={() => setEditing(null)} catColor={(c) => catColor(c, categories)} />
-      ) : (
-        <div style={{ display: "flex", flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 280, padding: 16 }}>
-            <div style={{ display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
-              <CategoryTab label="Toutes" active={activeCategory === "Toutes"} color={TEXT_MUTED} onClick={() => setActiveCategory("Toutes")} />
-              {categories.map((c) => <CategoryTab key={c} label={c} active={activeCategory === c} color={catColor(c, categories)} onClick={() => setActiveCategory(c)} />)}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
-              {visibleProducts.map((p) => (
-                <button key={p.id} onClick={() => addToCart(p)} style={{ textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` }}>
-                  <div style={{ width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: catColor(p.category, categories) }} />
-                  <div className="font-display" style={{ fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT }}>{p.name}</div>
-                  <div className="tabnum" style={{ fontSize: 18, fontWeight: 700, color: GOLD }}>{fmt(p.price)}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 }}>
-            <div style={{ borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" }}>
-              <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` }}>
-                <Icon.List size={16} color={TEXT_MUTED} />
-                <span className="font-display" style={{ fontSize: 14, color: TEXT }}>Ticket</span>
-                <span style={{ marginLeft: "auto", fontSize: 12, color: TEXT_MUTED }}>{cartCount} article{cartCount > 1 ? "s" : ""}</span>
-              </div>
-              <div style={{ padding: "8px 16px", maxHeight: 360, overflowY: "auto" }}>
-                {cart.length === 0 ? (
-                  <div style={{ fontSize: 12, textAlign: "center", padding: "40px 0", color: TEXT_MUTED }}>Le ticket est vide.<br/>Touche un produit pour commencer.</div>
-                ) : cart.map((it) => (
-                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${LINE}` }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
-                      <div className="tabnum" style={{ fontSize: 12, color: TEXT_MUTED }}>{fmt(it.price)} × {it.qty}</div>
-                    </div>
-                    <button onClick={() => changeQty(it.id, -1)} style={{ width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE }}><Icon.Minus size={13} color={TEXT} /></button>
-                    <span className="tabnum" style={{ fontSize: 14, width: 16, textAlign: "center", color: TEXT }}>{it.qty}</span>
-                    <button onClick={() => changeQty(it.id, 1)} style={{ width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: ACCENT }}><Icon.Plus size={13} color="#fff" /></button>
-                    <button onClick={() => removeFromCart(it.id)} style={{ width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", marginLeft: 4 }}><Icon.Trash size={13} color={TEXT_MUTED} /></button>
-                  </div>
-                ))}
-              </div>
-              <div style={{ padding: "12px 16px 16px", borderTop: `1px dashed ${LINE}` }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <span className="font-display" style={{ fontSize: 14, color: TEXT_MUTED }}>TOTAL</span>
-                  <span className="tabnum font-display" style={{ fontSize: 24, color: GOLD }}>{fmt(cartTotal)}</span>
-                </div>
-                <button onClick={checkout} disabled={cart.length === 0} className="font-display" style={{ width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, marginBottom: 8, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff", opacity: cart.length === 0 ? 0.6 : 1 }}>
-                  Encaisser
-                </button>
-                {cart.length > 0 && <button onClick={clearCart} style={{ width: "100%", padding: "8px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED }}>Vider le ticket</button>}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {toast && (
-        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 24, padding: "10px 16px", borderRadius: 999, fontSize: 14, fontWeight: 500, background: INK, color: "#fff", border: `1px solid ${LINE}`, zIndex: 50 }}>
-          {toast}
-        </div>
-      )}
-    </div>
-  );
+    function saveProducts(next) { setProducts(next); store.set("pos_products", next); }
+    function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture" }); setEditing("new"); }
+    function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category }); setEditing(p.id); }
+    function submitProductForm() {
+        const priceNum = parseFloat(String(form.price).replace(",", "."));
+        const costNum = parseFloat(String(form.cost).replace(",", ".")) || 0;
+        if (!form.name.trim() || isNaN(priceNum) || priceNum < 0 || !form.category.trim()) {
+            showToast("Vérifie le nom, le prix et la catégorie.");
+            return;
+        }
+        if (editing === "new") {
+            saveProducts([...products, { id: "p" + Date.now(), name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() }]);
+            showToast("Produit ajouté");
+        }
+        else {
+            saveProducts(products.map((p) => p.id === editing ? { ...p, name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() } : p));
+            showToast("Produit modifié");
+        }
+        setEditing(null);
+    }
+    function deleteProduct(id) { saveProducts(products.filter((p) => p.id !== id)); setEditing(null); showToast("Produit supprimé"); }
+    return (React.createElement("div", { style: { background: BG, minHeight: "100vh" } },
+        React.createElement("div", { className: "flex items-center justify-between", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+                React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 512 512", fill: "none" },
+                    React.createElement("circle", { cx: "256", cy: "256", r: "200", stroke: ACCENT, strokeWidth: "18" }),
+                    React.createElement("path", { d: "M170 210 C170 270 208 300 256 300 C304 300 342 270 342 210 Z", fill: ACCENT }),
+                    React.createElement("ellipse", { cx: "256", cy: "300", rx: "30", ry: "8", fill: ACCENT }),
+                    React.createElement("ellipse", { cx: "256", cy: "200", rx: "86", ry: "30", fill: TEXT }),
+                    React.createElement("line", { x1: "290", y1: "185", x2: "340", y2: "95", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" }),
+                    React.createElement("line", { x1: "305", y1: "192", x2: "360", y2: "105", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" })),
+                React.createElement("div", { style: { display: "flex", flexDirection: "column", lineHeight: 1 } },
+                    React.createElement("span", { className: "font-display", style: { fontSize: 20, color: TEXT } }, "TOTO"),
+                    React.createElement("span", { style: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT } }, "Since 2004"))),
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: PANEL } },
+                    React.createElement(Icon.Trend, { size: 16, color: GOLD }),
+                    React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(todaysCA))),
+                React.createElement("div", { style: { display: "flex", alignItems: "center", borderRadius: 999, padding: 4, background: PANEL } },
+                    React.createElement(TabButton, { active: view === "pos", onClick: () => setView("pos") }, "Caisse"),
+                    React.createElement(TabButton, { active: view === "stats", onClick: () => setView("stats"), icon: React.createElement(Icon.Bar, { size: 13 }) }, "Stats"),
+                    React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")))),
+        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: products, categories: categories, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: (c) => catColor(c, categories) })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+            React.createElement("div", { style: { flex: 1, minWidth: 280, padding: 16 } },
+                React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 } },
+                    React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
+                    categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: catColor(c, categories), onClick: () => setActiveCategory(c) }))),
+                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 } }, visibleProducts.map((p) => (React.createElement("button", { key: p.id, onClick: () => addToCart(p), style: { textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
+                    React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: catColor(p.category, categories) } }),
+                    React.createElement("div", { className: "font-display", style: { fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT } }, p.name),
+                    React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))))))),
+            React.createElement("div", { style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
+                React.createElement("div", { style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
+                    React.createElement("div", { style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },
+                        React.createElement(Icon.List, { size: 16, color: TEXT_MUTED }),
+                        React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT } }, "Ticket"),
+                        React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, color: TEXT_MUTED } },
+                            cartCount,
+                            " article",
+                            cartCount > 1 ? "s" : "")),
+                    React.createElement("div", { style: { padding: "8px 16px", maxHeight: 360, overflowY: "auto" } }, cart.length === 0 ? (React.createElement("div", { style: { fontSize: 12, textAlign: "center", padding: "40px 0", color: TEXT_MUTED } },
+                        "Le ticket est vide.",
+                        React.createElement("br", null),
+                        "Touche un produit pour commencer.")) : cart.map((it) => (React.createElement("div", { key: it.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${LINE}` } },
+                        React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                            React.createElement("div", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, it.name),
+                            React.createElement("div", { className: "tabnum", style: { fontSize: 12, color: TEXT_MUTED } },
+                                fmt(it.price),
+                                " \u00D7 ",
+                                it.qty)),
+                        React.createElement("button", { onClick: () => changeQty(it.id, -1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
+                            React.createElement(Icon.Minus, { size: 13, color: TEXT })),
+                        React.createElement("span", { className: "tabnum", style: { fontSize: 14, width: 16, textAlign: "center", color: TEXT } }, it.qty),
+                        React.createElement("button", { onClick: () => changeQty(it.id, 1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: ACCENT } },
+                            React.createElement(Icon.Plus, { size: 13, color: "#fff" })),
+                        React.createElement("button", { onClick: () => removeFromCart(it.id), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", marginLeft: 4 } },
+                            React.createElement(Icon.Trash, { size: 13, color: TEXT_MUTED })))))),
+                    React.createElement("div", { style: { padding: "12px 16px 16px", borderTop: `1px dashed ${LINE}` } },
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 } },
+                            React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL"),
+                            React.createElement("span", { className: "tabnum font-display", style: { fontSize: 24, color: GOLD } }, fmt(cartTotal))),
+                        React.createElement("button", { onClick: checkout, disabled: cart.length === 0, className: "font-display", style: { width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, marginBottom: 8, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff", opacity: cart.length === 0 ? 0.6 : 1 } }, "Encaisser"),
+                        cart.length > 0 && React.createElement("button", { onClick: clearCart, style: { width: "100%", padding: "8px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider le ticket")))))),
+        toast && (React.createElement("div", { style: { position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 24, padding: "10px 16px", borderRadius: 999, fontSize: 14, fontWeight: 500, background: INK, color: "#fff", border: `1px solid ${LINE}`, zIndex: 50 } }, toast))));
 }
-
 function TabButton({ active, onClick, children, icon }) {
-  return (
-    <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: active ? ACCENT : "transparent", color: active ? "#fff" : TEXT_MUTED }}>
-      {icon}{children}
-    </button>
-  );
+    return (React.createElement("button", { onClick: onClick, style: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: active ? ACCENT : "transparent", color: active ? "#fff" : TEXT_MUTED } },
+        icon,
+        children));
 }
-
 function CategoryTab({ label, active, color, onClick }) {
-  return (
-    <button onClick={onClick} style={{ flexShrink: 0, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? color : PANEL, color: active ? "#fff" : TEXT_MUTED, border: `1px solid ${active ? color : LINE}` }}>
-      {label}
-    </button>
-  );
+    return (React.createElement("button", { onClick: onClick, style: { flexShrink: 0, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? color : PANEL, color: active ? "#fff" : TEXT_MUTED, border: `1px solid ${active ? color : LINE}` } }, label));
 }
-
 function KpiCard({ label, value, color }) {
-  return (
-    <div style={{ borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` }}>
-      <div style={{ fontSize: 11, marginBottom: 4, color: TEXT_MUTED }}>{label}</div>
-      <div className="tabnum font-display" style={{ fontSize: 18, color }}>{value}</div>
-    </div>
-  );
+    return (React.createElement("div", { style: { borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` } },
+        React.createElement("div", { style: { fontSize: 11, marginBottom: 4, color: TEXT_MUTED } }, label),
+        React.createElement("div", { className: "tabnum font-display", style: { fontSize: 18, color } }, value)));
 }
-
 function StatsView({ period, setPeriod, currentLabel, trend, stats }) {
-  const maxCa = Math.max(1, ...trend.map((t) => t.ca));
-  const bestProduit = stats.topProduits[0];
-  return (
-    <div style={{ padding: 20 }}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {[{ key: "jour", label: "Jour" }, { key: "mois", label: "Mois" }, { key: "annee", label: "Année" }].map((opt) => (
-          <button key={opt.key} onClick={() => setPeriod(opt.key)} style={{ padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: period === opt.key ? ACCENT : PANEL, color: period === opt.key ? "#fff" : TEXT_MUTED, border: `1px solid ${period === opt.key ? ACCENT : LINE}` }}>
-            {opt.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ fontSize: 12, marginBottom: 8, color: TEXT_MUTED }}>{currentLabel}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
-        <KpiCard label="Chiffre d'affaires" value={fmt(stats.ca)} color={GOLD} />
-        <KpiCard label="Marge estimée" value={fmt(stats.marge)} color={ACCENT_GREEN} />
-        <KpiCard label="Ventes" value={String(stats.nbVentes)} color={TEXT} />
-        <KpiCard label="Panier moyen" value={fmt(stats.panierMoyen)} color={TEXT} />
-      </div>
-
-      <div style={{ borderRadius: 16, padding: 16, marginBottom: 24, background: PANEL, border: `1px solid ${LINE}` }}>
-        <div className="font-display" style={{ fontSize: 12, marginBottom: 14, color: TEXT_MUTED }}>
-          Évolution du CA {period === "jour" ? "(14 derniers jours)" : period === "mois" ? "(12 derniers mois)" : "(par année)"}
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 160 }}>
-          {trend.map((t) => (
-            <div key={t.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, height: "100%", justifyContent: "flex-end" }} title={fmt(t.ca)}>
-              <div style={{ width: "100%", maxWidth: 26, borderRadius: "4px 4px 0 0", background: ACCENT, height: `${Math.max(2, (t.ca / maxCa) * 130)}px` }} />
-              <div style={{ fontSize: 9, color: TEXT_MUTED, transform: "rotate(0deg)" }}>{t.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` }}>
-        <div className="font-display" style={{ fontSize: 12, marginBottom: 14, color: TEXT_MUTED }}>Top produits — {currentLabel.toLowerCase()}</div>
-        {stats.topProduits.length === 0 ? (
-          <div style={{ fontSize: 12, padding: "24px 0", textAlign: "center", color: TEXT_MUTED }}>Aucune vente sur cette période.</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {stats.topProduits.map((p, i) => (
-              <div key={p.name} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span className="tabnum" style={{ fontSize: 12, width: 16, color: TEXT_MUTED }}>{i + 1}</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, color: TEXT }}>{p.name}</div>
-                  <div style={{ height: 6, borderRadius: 999, marginTop: 4, background: LINE }}>
-                    <div style={{ height: 6, borderRadius: 999, width: `${bestProduit ? (p.qty / bestProduit.qty) * 100 : 0}%`, background: ACCENT }} />
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div className="tabnum" style={{ fontSize: 14, fontWeight: 600, color: TEXT }}>{p.qty}</div>
-                  <div className="tabnum" style={{ fontSize: 10, color: TEXT_MUTED }}>{fmt(p.ca)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+    const maxCa = Math.max(1, ...trend.map((t) => t.ca));
+    const bestProduit = stats.topProduits[0];
+    return (React.createElement("div", { style: { padding: 20 } },
+        React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 20 } }, [{ key: "jour", label: "Jour" }, { key: "mois", label: "Mois" }, { key: "annee", label: "Année" }].map((opt) => (React.createElement("button", { key: opt.key, onClick: () => setPeriod(opt.key), style: { padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: period === opt.key ? ACCENT : PANEL, color: period === opt.key ? "#fff" : TEXT_MUTED, border: `1px solid ${period === opt.key ? ACCENT : LINE}` } }, opt.label)))),
+        React.createElement("div", { style: { fontSize: 12, marginBottom: 8, color: TEXT_MUTED } }, currentLabel),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 } },
+            React.createElement(KpiCard, { label: "Chiffre d'affaires", value: fmt(stats.ca), color: GOLD }),
+            React.createElement(KpiCard, { label: "Marge estim\u00E9e", value: fmt(stats.marge), color: ACCENT_GREEN }),
+            React.createElement(KpiCard, { label: "Ventes", value: String(stats.nbVentes), color: TEXT }),
+            React.createElement(KpiCard, { label: "Panier moyen", value: fmt(stats.panierMoyen), color: TEXT })),
+        React.createElement("div", { style: { borderRadius: 16, padding: 16, marginBottom: 24, background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { className: "font-display", style: { fontSize: 12, marginBottom: 14, color: TEXT_MUTED } },
+                "\u00C9volution du CA ",
+                period === "jour" ? "(14 derniers jours)" : period === "mois" ? "(12 derniers mois)" : "(par année)"),
+            React.createElement("div", { style: { display: "flex", alignItems: "flex-end", gap: 6, height: 160 } }, trend.map((t) => (React.createElement("div", { key: t.key, style: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, height: "100%", justifyContent: "flex-end" }, title: fmt(t.ca) },
+                React.createElement("div", { style: { width: "100%", maxWidth: 26, borderRadius: "4px 4px 0 0", background: ACCENT, height: `${Math.max(2, (t.ca / maxCa) * 130)}px` } }),
+                React.createElement("div", { style: { fontSize: 9, color: TEXT_MUTED, transform: "rotate(0deg)" } }, t.label)))))),
+        React.createElement("div", { style: { borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { className: "font-display", style: { fontSize: 12, marginBottom: 14, color: TEXT_MUTED } },
+                "Top produits \u2014 ",
+                currentLabel.toLowerCase()),
+            stats.topProduits.length === 0 ? (React.createElement("div", { style: { fontSize: 12, padding: "24px 0", textAlign: "center", color: TEXT_MUTED } }, "Aucune vente sur cette p\u00E9riode.")) : (React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, stats.topProduits.map((p, i) => (React.createElement("div", { key: p.name, style: { display: "flex", alignItems: "center", gap: 12 } },
+                React.createElement("span", { className: "tabnum", style: { fontSize: 12, width: 16, color: TEXT_MUTED } }, i + 1),
+                React.createElement("div", { style: { flex: 1 } },
+                    React.createElement("div", { style: { fontSize: 14, color: TEXT } }, p.name),
+                    React.createElement("div", { style: { height: 6, borderRadius: 999, marginTop: 4, background: LINE } },
+                        React.createElement("div", { style: { height: 6, borderRadius: 999, width: `${bestProduit ? (p.qty / bestProduit.qty) * 100 : 0}%`, background: ACCENT } }))),
+                React.createElement("div", { style: { textAlign: "right" } },
+                    React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: TEXT } }, p.qty),
+                    React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca)))))))))));
 }
-
 function ManageView({ products, categories, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor }) {
-  return (
-    <div style={{ padding: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <span className="font-display" style={{ fontSize: 18, color: TEXT }}>Produits ({products.length})</span>
-        <button onClick={openNewProduct} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" }}>
-          <Icon.Plus size={15} /> Nouveau produit
-        </button>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
-        {products.map((p) => (
-          <button key={p.id} onClick={() => openEditProduct(p)} style={{ display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 16px", background: PANEL, border: `1px solid ${LINE}` }}>
-            <div style={{ width: 8, height: 32, borderRadius: 999, background: catColor(p.category) }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: TEXT }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: TEXT_MUTED }}>{p.category} · marge {fmt(p.price - (p.cost || 0))}</div>
-            </div>
-            <div className="tabnum" style={{ fontSize: 14, fontWeight: 600, color: GOLD }}>{fmt(p.price)}</div>
-          </button>
-        ))}
-      </div>
-
-      {editing && (
-        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16, background: "rgba(0,0,0,0.5)" }}>
-          <div style={{ width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <span className="font-display" style={{ fontSize: 16, color: TEXT }}>{editing === "new" ? "Nouveau produit" : "Modifier le produit"}</span>
-              <button onClick={closeForm} style={{ background: "transparent" }}><Icon.X size={18} color={TEXT_MUTED} /></button>
-            </div>
-            <label style={{ fontSize: 12, color: TEXT_MUTED }}>Nom</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }} placeholder="Ex : Nem crevette" />
-            <label style={{ fontSize: 12, color: TEXT_MUTED }}>Prix de vente (F CFP)</label>
-            <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} style={{ width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }} placeholder="Ex : 1200" inputMode="numeric" />
-            <label style={{ fontSize: 12, color: TEXT_MUTED }}>Coût d'achat (F CFP)</label>
-            <input value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} style={{ width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }} placeholder="Ex : 500" inputMode="numeric" />
-            <label style={{ fontSize: 12, color: TEXT_MUTED }}>Catégorie</label>
-            <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} list="cats" style={{ width: "100%", marginBottom: 4, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }} placeholder="Ex : Friture" />
-            <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
-            <button onClick={submitProductForm} className="font-display" style={{ width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" }}>Enregistrer</button>
-            {editing !== "new" && <button onClick={() => deleteProduct(editing)} style={{ width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" }}>Supprimer ce produit</button>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    return (React.createElement("div", { style: { padding: 20 } },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
+            React.createElement("span", { className: "font-display", style: { fontSize: 18, color: TEXT } },
+                "Produits (",
+                products.length,
+                ")"),
+            React.createElement("button", { onClick: openNewProduct, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" } },
+                React.createElement(Icon.Plus, { size: 15 }),
+                " Nouveau produit")),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 } }, products.map((p) => (React.createElement("button", { key: p.id, onClick: () => openEditProduct(p), style: { display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 16px", background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { style: { width: 8, height: 32, borderRadius: 999, background: catColor(p.category) } }),
+            React.createElement("div", { style: { flex: 1 } },
+                React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: TEXT } }, p.name),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED } },
+                    p.category,
+                    " \u00B7 marge ",
+                    fmt(p.price - (p.cost || 0)))),
+            React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(p.price)))))),
+        editing && (React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16, background: "rgba(0,0,0,0.5)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
+                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, editing === "new" ? "Nouveau produit" : "Modifier le produit"),
+                    React.createElement("button", { onClick: closeForm, style: { background: "transparent" } },
+                        React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Nom"),
+                React.createElement("input", { value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Nem crevette" }),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Prix de vente (F CFP)"),
+                React.createElement("input", { value: form.price, onChange: (e) => setForm({ ...form, price: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : 1200", inputMode: "numeric" }),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Co\u00FBt d'achat (F CFP)"),
+                React.createElement("input", { value: form.cost, onChange: (e) => setForm({ ...form, cost: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : 500", inputMode: "numeric" }),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Cat\u00E9gorie"),
+                React.createElement("input", { value: form.category, onChange: (e) => setForm({ ...form, category: e.target.value }), list: "cats", style: { width: "100%", marginBottom: 4, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Friture" }),
+                React.createElement("datalist", { id: "cats" }, categories.map((c) => React.createElement("option", { key: c, value: c }))),
+                React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
+                editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit"))))));
 }
-
 try {
-  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-  window.__totoMounted = true;
-  const fb = document.getElementById("fallback");
-  if (fb) fb.style.display = "none";
-} catch (e) {
-  showFatal("Erreur au démarrage : " + e.message);
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
+    window.__totoMounted = true;
+    const fb = document.getElementById("fallback");
+    if (fb)
+        fb.style.display = "none";
 }
+catch (e) {
+    showFatal("Erreur au démarrage : " + e.message);
+}
+
 </script>
 </body>
 </html>

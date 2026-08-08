@@ -404,6 +404,22 @@ function App() {
             navigator.serviceWorker.register("service-worker.js").catch(() => { });
         }
     }, []);
+    // Échap ferme ce qui est ouvert, du plus superficiel au plus profond :
+    // une fenêtre d'abord, le mode rangement ensuite.
+    useEffect(() => {
+        function onKey(e) {
+            if (e.key !== "Escape")
+                return;
+            if (editing) {
+                setEditing(null);
+                return;
+            }
+            if (reorderPos)
+                setReorderPos(false);
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [editing, reorderPos]);
     function showToast(msg) {
         setToast(msg);
         if (toastTimer.current)
@@ -740,7 +756,7 @@ function TabButton({ active, onClick, children, icon }) {
         children));
 }
 function ReorderButton({ active, onClick }) {
-    return (React.createElement("button", { onClick: onClick, title: active ? "Terminer le rangement" : "Réorganiser les produits", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? ACCENT_GREEN : "transparent", color: active ? "#fff" : TEXT_MUTED, border: `1px ${active ? "solid" : "dashed"} ${active ? ACCENT_GREEN : LINE}` } },
+    return (React.createElement("button", { onClick: onClick, title: active ? "Terminer le rangement (Échap)" : "Réorganiser les produits et les catégories", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? ACCENT_GREEN : "transparent", color: active ? "#fff" : TEXT_MUTED, border: `1px ${active ? "solid" : "dashed"} ${active ? ACCENT_GREEN : LINE}` } },
         React.createElement(Icon.Move, { size: 14, color: active ? "#fff" : TEXT_MUTED }),
         active ? "Terminé" : "Ranger"));
 }
@@ -795,6 +811,31 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
     // On rouvre toujours le formulaire produit sur les pastilles. Le champ
     // libre ne réapparaît que si la catégorie du produit n'existe plus.
     useEffect(() => { setCatLibre(false); }, [editing]);
+    // Échap dans l'onglet Produits. La confirmation de suppression revient à
+    // l'écran précédent plutôt que de tout fermer : on ne perd pas la saisie
+    // en cours par un appui réflexe.
+    useEffect(() => {
+        function onKey(e) {
+            if (e.key !== "Escape")
+                return;
+            if (confirmPin !== null) {
+                setConfirmPin(null);
+                setCatError(null);
+                return;
+            }
+            if (catForm) {
+                setCatForm(null);
+                setCatError(null);
+                return;
+            }
+            if (editing)
+                return; // la fenêtre produit est gérée plus haut
+            if (reorder)
+                setReorder(false);
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [confirmPin, catForm, editing, reorder]);
     const montrerLibre = catLibre || (!!form.category && categories.indexOf(form.category) === -1);
     function openCatForm(doc) {
         setCatError(null);

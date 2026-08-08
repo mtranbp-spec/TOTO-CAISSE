@@ -108,6 +108,8 @@ const ACCENT_GREEN = "#3EA283";
 const GOLD = "#E8B44A";
 const CATEGORY_COLORS = { "Friture": ACCENT, "Plats chauds": ACCENT_GREEN };
 const FALLBACK_COLORS = [ACCENT, ACCENT_GREEN, GOLD, "#4B7BE1", "#B85AE1"];
+// Couleurs proposées au choix lors de la création/modification d'une catégorie.
+const PALETTE = [ACCENT, ACCENT_GREEN, GOLD, "#4B7BE1", "#B85AE1", "#E8763A", "#3AA8E8", "#8AC926"];
 function catColor(cat, cats) {
     if (CATEGORY_COLORS[cat])
         return CATEGORY_COLORS[cat];
@@ -172,6 +174,8 @@ const Icon = {
         React.createElement("path", { d: "M12 20V10M18 20V4M6 20v-4", stroke: p.color || "#fff", strokeWidth: "2.2", strokeLinecap: "round" })),
     X: (p) => React.createElement("svg", { width: p.size || 18, height: p.size || 18, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M18 6 6 18M6 6l12 12", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Pencil: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Lock: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("rect", { x: "4", y: "11", width: "16", height: "10", rx: "2", stroke: p.color || "#fff", strokeWidth: "2" }),
         React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
@@ -188,6 +192,8 @@ function App() {
     const [toast, setToast] = useState(null);
     const [editing, setEditing] = useState(null);
     const [form, setForm] = useState({ name: "", price: "", cost: "", category: "" });
+    const [catDocs, setCatDocs] = useState([]);
+    const [catsLoaded, setCatsLoaded] = useState(false);
     const toastTimer = useRef(null);
     useEffect(() => {
         const db = getDb();
@@ -211,8 +217,28 @@ function App() {
             setSyncStatus("live");
         }, () => setSyncStatus("error"));
         const unsubSales = db.collection("sales").onSnapshot((snap) => setSales(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setSyncStatus("error"));
-        return () => { unsubProducts(); unsubSales(); };
+        const unsubCats = db.collection("categories").onSnapshot((snap) => {
+            setCatDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+            setCatsLoaded(true);
+        }, () => setSyncStatus("error"));
+        return () => { unsubProducts(); unsubSales(); unsubCats(); };
     }, []);
+    // Amorçage : les catégories n'existaient qu'implicitement dans les produits.
+    // Au premier lancement on les matérialise en documents, avec leurs couleurs
+    // actuelles, pour que rien ne change visuellement.
+    useEffect(() => {
+        const db = getDb();
+        if (!db || !catsLoaded || catDocs.length > 0 || products.length === 0)
+            return;
+        const noms = Array.from(new Set(products.map((p) => p.category).filter(Boolean)));
+        if (noms.length === 0)
+            return;
+        const batch = db.batch();
+        noms.forEach((nom, i) => {
+            batch.set(db.collection("categories").doc("c" + (Date.now() + i)), { name: nom, color: catColor(nom, noms), order: i });
+        });
+        batch.commit().catch(() => { });
+    }, [catsLoaded, catDocs.length, products]);
     useEffect(() => {
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("service-worker.js").catch(() => { });
@@ -224,7 +250,49 @@ function App() {
             clearTimeout(toastTimer.current);
         toastTimer.current = setTimeout(() => setToast(null), 2200);
     }
-    const categories = useMemo(() => Array.from(new Set(products.map((p) => p.category))), [products]);
+    // Les catégories déclarées font foi et gardent leur ordre. On y ajoute
+    // celles qui n'apparaîtraient que dans un produit (import, ancien doc) pour
+    // qu'aucun produit ne devienne invisible.
+    const sortedCatDocs = useMemo(() => catDocs.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name))), [catDocs]);
+    const categories = useMemo(() => {
+        const noms = sortedCatDocs.map((c) => c.name);
+        products.forEach((p) => { if (p.category && noms.indexOf(p.category) === -1) noms.push(p.category); });
+        return noms;
+    }, [sortedCatDocs, products]);
+    const colorOf = useMemo(() => {
+        const m = {};
+        sortedCatDocs.forEach((c) => { if (c.color) m[c.name] = c.color; });
+        return (nom) => m[nom] || catColor(nom, categories);
+    }, [sortedCatDocs, categories]);
+    function countIn(nom) { return products.filter((p) => p.category === nom).length; }
+    function saveCategory(id, nom, couleur) {
+        const db = getDb();
+        if (!db)
+            return Promise.reject(new Error("hors ligne"));
+        const propre = nom.trim();
+        const existant = sortedCatDocs.find((c) => c.name.toLowerCase() === propre.toLowerCase() && c.id !== id);
+        if (existant)
+            return Promise.reject(new Error("Cette catégorie existe déjà."));
+        if (id) {
+            const avant = sortedCatDocs.find((c) => c.id === id);
+            const renomme = avant && avant.name !== propre;
+            const batch = db.batch();
+            batch.set(db.collection("categories").doc(id), { name: propre, color: couleur, order: avant ? (avant.order ?? 0) : 0 });
+            // Un renommage doit suivre sur les produits, sinon ils resteraient
+            // rattachés à un nom de catégorie qui n'existe plus.
+            if (renomme)
+                products.filter((p) => p.category === avant.name).forEach((p) => batch.update(db.collection("products").doc(p.id), { category: propre }));
+            return batch.commit();
+        }
+        const ordre = sortedCatDocs.length ? Math.max(...sortedCatDocs.map((c) => c.order ?? 0)) + 1 : 0;
+        return db.collection("categories").doc("c" + Date.now()).set({ name: propre, color: couleur, order: ordre });
+    }
+    function deleteCategory(id) {
+        const db = getDb();
+        if (!db)
+            return Promise.reject(new Error("hors ligne"));
+        return db.collection("categories").doc(id).delete();
+    }
     const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? products : products.filter((p) => p.category === activeCategory)), [products, activeCategory]);
     const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
@@ -386,13 +454,13 @@ function App() {
                     React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: products, categories: categories, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: (c) => catColor(c, categories) })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: products, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-                    categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: catColor(c, categories), onClick: () => setActiveCategory(c) }))),
+                    categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: colorOf(c), onClick: () => setActiveCategory(c) }))),
                 React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 } }, visibleProducts.map((p) => (React.createElement("button", { key: p.id, onClick: () => addToCart(p), style: { textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
-                    React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: catColor(p.category, categories) } }),
+                    React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: colorOf(p.category) } }),
                     React.createElement("div", { className: "font-display", style: { fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT } }, p.name),
                     React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))))))),
             React.createElement("div", { style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
@@ -474,8 +542,54 @@ function StatsView({ period, setPeriod, currentLabel, trend, stats }) {
                     React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: TEXT } }, p.qty),
                     React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca)))))))))));
 }
-function ManageView({ products, categories, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor }) {
+function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast }) {
     const [activeCategory, setActiveCategory] = useState("Toutes");
+    const [catForm, setCatForm] = useState(null); // { id, name, color } — id null = création
+    const [catBusy, setCatBusy] = useState(false);
+    const [catError, setCatError] = useState(null);
+    const [confirmPin, setConfirmPin] = useState(null); // saisie du code avant suppression
+    function openCatForm(doc) {
+        setCatError(null);
+        setConfirmPin(null);
+        setCatForm(doc ? { id: doc.id, name: doc.name, color: doc.color || catColor(doc.name) } : { id: null, name: "", color: PALETTE[0] });
+    }
+    function submitCatForm() {
+        if (!catForm || !catForm.name.trim() || catBusy)
+            return;
+        setCatBusy(true);
+        setCatError(null);
+        saveCategory(catForm.id, catForm.name, catForm.color)
+            .then(() => { showToast(catForm.id ? "Catégorie modifiée" : "Catégorie ajoutée"); setCatForm(null); })
+            .catch((err) => setCatError(err.message || "Enregistrement impossible."))
+            .then(() => setCatBusy(false));
+    }
+    function askDelete() {
+        const n = countIn(catForm.name);
+        if (n > 0) {
+            setCatError(`${n} produit${n > 1 ? "s utilisent" : " utilise"} cette catégorie. Déplace-${n > 1 ? "les" : "le"} avant de la supprimer.`);
+            return;
+        }
+        setCatError(null);
+        setConfirmPin("");
+    }
+    function confirmDelete() {
+        const auth = getAuth();
+        if (!auth || !auth.currentUser || catBusy)
+            return;
+        setCatBusy(true);
+        setCatError(null);
+        // On revérifie le code auprès de Firebase plutôt que de le comparer
+        // localement : le PIN n'est stocké nulle part côté navigateur.
+        const cred = firebase.auth.EmailAuthProvider.credential(auth.currentUser.email, confirmPin);
+        auth.currentUser.reauthenticateWithCredential(cred)
+            .then(() => deleteCategory(catForm.id))
+            .then(() => { showToast("Catégorie supprimée"); setCatForm(null); setConfirmPin(null); })
+            .catch((err) => {
+                const code = err && err.code ? err.code : "";
+                setCatError(code.indexOf("password") !== -1 || code.indexOf("credential") !== -1 ? "Code incorrect." : "Suppression impossible.");
+            })
+            .then(() => setCatBusy(false));
+    }
     // Si la catégorie active disparaît (dernier produit supprimé ou renommé),
     // on retombe sur "Toutes" plutôt que d'afficher une liste vide sans raison.
     useEffect(() => {
@@ -492,9 +606,24 @@ function ManageView({ products, categories, editing, form, setForm, openNewProdu
             React.createElement("button", { onClick: openNewProduct, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" } },
                 React.createElement(Icon.Plus, { size: 15 }),
                 " Nouveau produit")),
-        React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 } },
+        React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
             React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-            categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: catColor(c), onClick: () => setActiveCategory(c) }))),
+            categories.map((c) => {
+                const doc = catDocs.find((d) => d.name === c);
+                const actif = activeCategory === c;
+                const couleur = catColor(c);
+                return React.createElement("div", { key: c, style: { flexShrink: 0, display: "flex", alignItems: "center", borderRadius: 999, background: actif ? couleur : PANEL, border: `1px solid ${actif ? couleur : LINE}` } },
+                    React.createElement("button", { onClick: () => setActiveCategory(c), style: { padding: "8px 4px 8px 16px", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: actif ? "#fff" : TEXT_MUTED } }, c),
+                    // Sans document associé (catégorie héritée d'un produit), il n'y
+                    // a rien à modifier : on n'affiche pas le crayon.
+                    doc
+                        ? React.createElement("button", { onClick: () => openCatForm(doc), title: `Modifier « ${c} »`, style: { display: "flex", alignItems: "center", padding: "8px 12px 8px 6px", background: "transparent" } },
+                            React.createElement(Icon.Pencil, { size: 13, color: actif ? "#fff" : TEXT_MUTED }))
+                        : React.createElement("span", { style: { paddingRight: 12 } }));
+            }),
+            React.createElement("button", { onClick: () => openCatForm(null), title: "Nouvelle catégorie", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
+                React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }),
+                "Catégorie")),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 } }, visibleProducts.map((p) => (React.createElement("button", { key: p.id, onClick: () => openEditProduct(p), style: { display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 16px", background: PANEL, border: `1px solid ${LINE}` } },
             React.createElement("div", { style: { width: 8, height: 32, borderRadius: 999, background: catColor(p.category) } }),
             React.createElement("div", { style: { flex: 1 } },
@@ -520,7 +649,32 @@ function ManageView({ products, categories, editing, form, setForm, openNewProdu
                 React.createElement("input", { value: form.category, onChange: (e) => setForm({ ...form, category: e.target.value }), list: "cats", style: { width: "100%", marginBottom: 4, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Friture" }),
                 React.createElement("datalist", { id: "cats" }, categories.map((c) => React.createElement("option", { key: c, value: c }))),
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
-                editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit"))))));
+                editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit")))),
+        catForm && (React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.5)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
+                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, confirmPin !== null ? "Supprimer la catégorie" : catForm.id ? "Modifier la catégorie" : "Nouvelle catégorie"),
+                    React.createElement("button", { onClick: () => { setCatForm(null); setConfirmPin(null); setCatError(null); }, style: { background: "transparent" } },
+                        React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
+                confirmPin !== null
+                    ? React.createElement("div", null,
+                        React.createElement("div", { style: { fontSize: 13, color: TEXT, marginBottom: 4 } },
+                            "Supprimer définitivement « ",
+                            catForm.name,
+                            " » ?"),
+                        React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } }, "Saisis ton code d'accès pour confirmer."),
+                        React.createElement("input", { value: confirmPin, type: "password", inputMode: "numeric", autoFocus: true, disabled: catBusy, onChange: (e) => setConfirmPin(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") confirmDelete(); }, style: { width: "100%", padding: "12px 16px", borderRadius: 10, fontSize: 18, letterSpacing: 6, textAlign: "center", background: BG, color: TEXT, border: `1px solid ${catError ? ACCENT : LINE}` }, placeholder: "••••••" }),
+                        catError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 10 } }, catError),
+                        React.createElement("button", { onClick: confirmDelete, disabled: catBusy || !confirmPin, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: catBusy || !confirmPin ? LINE : "#C2352A", color: catBusy || !confirmPin ? TEXT_MUTED : "#fff" } }, catBusy ? "Vérification…" : "Supprimer définitivement"),
+                        React.createElement("button", { onClick: () => { setConfirmPin(null); setCatError(null); }, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))
+                    : React.createElement("div", null,
+                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Nom"),
+                        React.createElement("input", { value: catForm.name, autoFocus: true, disabled: catBusy, onChange: (e) => setCatForm({ ...catForm, name: e.target.value }), onKeyDown: (e) => { if (e.key === "Enter") submitCatForm(); }, style: { width: "100%", marginBottom: 16, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Desserts" }),
+                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Couleur"),
+                        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 } }, PALETTE.map((c) => React.createElement("button", { key: c, onClick: () => setCatForm({ ...catForm, color: c }), title: c, style: { width: 32, height: 32, borderRadius: 999, background: c, border: catForm.color === c ? `3px solid ${TEXT}` : `1px solid ${LINE}` } }))),
+                        catError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 12 } }, catError),
+                        React.createElement("button", { onClick: submitCatForm, disabled: catBusy || !catForm.name.trim(), className: "font-display", style: { width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: catBusy || !catForm.name.trim() ? LINE : ACCENT_GREEN, color: catBusy || !catForm.name.trim() ? TEXT_MUTED : "#fff" } }, catBusy ? "Enregistrement…" : "Enregistrer"),
+                        catForm.id && React.createElement("button", { onClick: askDelete, disabled: catBusy, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer cette catégorie")))))));
 }
 /* ---------- Écran de connexion (PIN partagé) ---------- */
 function LoginView() {

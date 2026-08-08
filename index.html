@@ -26,6 +26,15 @@
   ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
   button { font-family: inherit; cursor: pointer; border: none; }
   input { font-family: inherit; }
+  /* Mode réorganisation : léger tremblement, comme sur l'écran d'accueil iOS. */
+  @keyframes toto-wiggle {
+    0%   { transform: rotate(-0.7deg); }
+    50%  { transform: rotate(0.7deg); }
+    100% { transform: rotate(-0.7deg); }
+  }
+  .toto-wiggle { animation: toto-wiggle 0.22s ease-in-out infinite; }
+  .toto-drag { touch-action: none; }
+  @media (prefers-reduced-motion: reduce) { .toto-wiggle { animation: none; } }
 </style>
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin onerror="showFatal('Impossible de charger React depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
@@ -174,12 +183,104 @@ const Icon = {
         React.createElement("path", { d: "M12 20V10M18 20V4M6 20v-4", stroke: p.color || "#fff", strokeWidth: "2.2", strokeLinecap: "round" })),
     X: (p) => React.createElement("svg", { width: p.size || 18, height: p.size || 18, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M18 6 6 18M6 6l12 12", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Move: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Pencil: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Lock: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("rect", { x: "4", y: "11", width: "16", height: "10", rx: "2", stroke: p.color || "#fff", strokeWidth: "2" }),
         React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
 };
+/* ---------- Grille réorganisable (glisser-déposer doigt + souris) ----------
+   Le drag HTML5 natif ne fonctionne pas au toucher : on passe donc par les
+   événements Pointer, qui couvrent souris, doigt et stylet de la même façon.
+   Pendant le glisser, l'ordre est tenu localement et n'est écrit en base
+   qu'au relâchement, pour ne pas saturer Firestore à chaque pixel. */
+function ReorderGrid({ items, active, gridStyle, renderItem, onReorder }) {
+    const [ids, setIds] = useState(null);
+    const [dragId, setDragId] = useState(null);
+    const [offset, setOffset] = useState({ x: 0, y: 0 });
+    const nodes = useRef(new Map());
+    const startPt = useRef(null);
+    const liste = useMemo(() => {
+        if (!ids)
+            return items;
+        const parId = {};
+        items.forEach((it) => { parId[it.id] = it; });
+        const rangés = ids.map((id) => parId[id]).filter(Boolean);
+        items.forEach((it) => { if (ids.indexOf(it.id) === -1) rangés.push(it); });
+        return rangés;
+    }, [items, ids]);
+    // En sortant du mode réorganisation, on repart de l'ordre réel en base.
+    useEffect(() => { if (!active) { setIds(null); setDragId(null); } }, [active]);
+    function terminer() {
+        if (dragId && ids)
+            onReorder(ids);
+        setDragId(null);
+        startPt.current = null;
+        setOffset({ x: 0, y: 0 });
+    }
+    function onDown(e, id) {
+        if (!active)
+            return;
+        try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+        }
+        catch (err) { }
+        startPt.current = { x: e.clientX, y: e.clientY };
+        setDragId(id);
+        setIds(liste.map((i) => i.id));
+        setOffset({ x: 0, y: 0 });
+    }
+    function onMove(e) {
+        if (!dragId || !startPt.current)
+            return;
+        const courant = ids || liste.map((i) => i.id);
+        let cible = null;
+        nodes.current.forEach((el, id) => {
+            if (!el || id === dragId || cible)
+                return;
+            const r = el.getBoundingClientRect();
+            if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)
+                cible = id;
+        });
+        if (cible) {
+            const de = courant.indexOf(dragId);
+            const vers = courant.indexOf(cible);
+            if (de !== -1 && vers !== -1 && de !== vers) {
+                const suivant = courant.slice();
+                suivant.splice(vers, 0, suivant.splice(de, 1)[0]);
+                setIds(suivant);
+                // On recale l'origine sur la position actuelle : sans ça, la
+                // tuile ferait un bond au moment où les voisines se décalent.
+                startPt.current = { x: e.clientX, y: e.clientY };
+                setOffset({ x: 0, y: 0 });
+                return;
+            }
+        }
+        setOffset({ x: e.clientX - startPt.current.x, y: e.clientY - startPt.current.y });
+    }
+    return React.createElement("div", { style: gridStyle }, liste.map((it) => {
+        const enCours = dragId === it.id;
+        return React.createElement("div", {
+            key: it.id,
+            ref: (el) => { if (el) nodes.current.set(it.id, el); else nodes.current.delete(it.id); },
+            className: active ? (enCours ? "toto-drag" : "toto-drag toto-wiggle") : undefined,
+            onPointerDown: (e) => onDown(e, it.id),
+            onPointerMove: onMove,
+            onPointerUp: terminer,
+            onPointerCancel: terminer,
+            style: {
+                transform: enCours ? `translate(${offset.x}px, ${offset.y}px) scale(1.04)` : undefined,
+                zIndex: enCours ? 20 : undefined,
+                position: enCours ? "relative" : undefined,
+                opacity: enCours ? 0.92 : 1,
+                transition: enCours ? "none" : "transform 0.15s ease",
+                cursor: active ? "grab" : undefined,
+            },
+        }, renderItem(it, active));
+    }));
+}
 /* ---------- App ---------- */
 function App() {
     const [products, setProducts] = useState(DEFAULT_PRODUCTS);
@@ -194,6 +295,7 @@ function App() {
     const [form, setForm] = useState({ name: "", price: "", cost: "", category: "" });
     const [catDocs, setCatDocs] = useState([]);
     const [catsLoaded, setCatsLoaded] = useState(false);
+    const [reorderPos, setReorderPos] = useState(false);
     const toastTimer = useRef(null);
     useEffect(() => {
         const db = getDb();
@@ -293,7 +395,51 @@ function App() {
             return Promise.reject(new Error("hors ligne"));
         return db.collection("categories").doc(id).delete();
     }
-    const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? products : products.filter((p) => p.category === activeCategory)), [products, activeCategory]);
+    // Firestore renvoie les documents triés par identifiant : sans champ
+    // "order", on obtiendrait p1, p10, p11, p12, p2… On trie donc sur l'ordre
+    // choisi, avec repli sur l'ordre naturel des identifiants.
+    const orderedProducts = useMemo(() => products.slice().sort((a, b) => {
+        const oa = typeof a.order === "number" ? a.order : Number.MAX_SAFE_INTEGER;
+        const ob = typeof b.order === "number" ? b.order : Number.MAX_SAFE_INTEGER;
+        if (oa !== ob)
+            return oa - ob;
+        return String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+    }), [products]);
+    // Migration unique : on fige l'ordre affiché aujourd'hui pour les produits
+    // qui n'en ont pas encore, sans rien bousculer visuellement.
+    const migrated = useRef(false);
+    useEffect(() => {
+        const db = getDb();
+        if (!db || migrated.current || orderedProducts.length === 0)
+            return;
+        if (orderedProducts.every((p) => typeof p.order === "number"))
+            return;
+        migrated.current = true;
+        const batch = db.batch();
+        orderedProducts.forEach((p, i) => batch.update(db.collection("products").doc(p.id), { order: i }));
+        batch.commit().catch(() => { migrated.current = false; });
+    }, [orderedProducts]);
+    function reorderProducts(ids) {
+        const db = getDb();
+        if (!db)
+            return;
+        // Les identifiants reçus ne couvrent que la vue filtrée : on réinjecte
+        // ce nouvel ordre à sa place dans la liste complète.
+        const indexGlobal = {};
+        orderedProducts.forEach((p, i) => { indexGlobal[p.id] = i; });
+        const creneaux = ids.map((id) => indexGlobal[id]).sort((a, b) => a - b);
+        const batch = db.batch();
+        let change = false;
+        ids.forEach((id, i) => {
+            if (indexGlobal[id] !== creneaux[i]) {
+                batch.update(db.collection("products").doc(id), { order: creneaux[i] });
+                change = true;
+            }
+        });
+        if (change)
+            batch.commit().catch(() => showToast("⚠️ Ordre non enregistré — pas de connexion."));
+    }
+    const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? orderedProducts : orderedProducts.filter((p) => p.category === activeCategory)), [orderedProducts, activeCategory]);
     const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
     const todaysCA = useMemo(() => {
@@ -454,15 +600,22 @@ function App() {
                     React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: products, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { style: { flex: 1, minWidth: 280, padding: 16 } },
-                React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 } },
+                React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-                    categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: colorOf(c), onClick: () => setActiveCategory(c) }))),
-                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 } }, visibleProducts.map((p) => (React.createElement("button", { key: p.id, onClick: () => addToCart(p), style: { textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
-                    React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: colorOf(p.category) } }),
-                    React.createElement("div", { className: "font-display", style: { fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT } }, p.name),
-                    React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))))))),
+                    categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: colorOf(c), onClick: () => setActiveCategory(c) })),
+                    React.createElement(ReorderButton, { active: reorderPos, onClick: () => setReorderPos((v) => !v) })),
+                React.createElement(ReorderGrid, {
+                    items: visibleProducts,
+                    active: reorderPos,
+                    onReorder: reorderProducts,
+                    gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 },
+                    renderItem: (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) addToCart(p); }, style: { width: "100%", textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
+                        React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: colorOf(p.category) } }),
+                        React.createElement("div", { className: "font-display", style: { fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT } }, p.name),
+                        React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))),
+                })),
             React.createElement("div", { style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
                 React.createElement("div", { style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
                     React.createElement("div", { style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },
@@ -501,6 +654,11 @@ function TabButton({ active, onClick, children, icon }) {
     return (React.createElement("button", { onClick: onClick, style: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: active ? ACCENT : "transparent", color: active ? "#fff" : TEXT_MUTED } },
         icon,
         children));
+}
+function ReorderButton({ active, onClick }) {
+    return (React.createElement("button", { onClick: onClick, title: active ? "Terminer le rangement" : "Réorganiser les produits", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? ACCENT_GREEN : "transparent", color: active ? "#fff" : TEXT_MUTED, border: `1px ${active ? "solid" : "dashed"} ${active ? ACCENT_GREEN : LINE}` } },
+        React.createElement(Icon.Move, { size: 14, color: active ? "#fff" : TEXT_MUTED }),
+        active ? "Terminé" : "Ranger"));
 }
 function CategoryTab({ label, active, color, onClick }) {
     return (React.createElement("button", { onClick: onClick, style: { flexShrink: 0, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? color : PANEL, color: active ? "#fff" : TEXT_MUTED, border: `1px solid ${active ? color : LINE}` } }, label));
@@ -542,12 +700,13 @@ function StatsView({ period, setPeriod, currentLabel, trend, stats }) {
                     React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: TEXT } }, p.qty),
                     React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca)))))))))));
 }
-function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast }) {
+function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts }) {
     const [activeCategory, setActiveCategory] = useState("Toutes");
     const [catForm, setCatForm] = useState(null); // { id, name, color } — id null = création
     const [catBusy, setCatBusy] = useState(false);
     const [catError, setCatError] = useState(null);
     const [confirmPin, setConfirmPin] = useState(null); // saisie du code avant suppression
+    const [reorder, setReorder] = useState(false);
     function openCatForm(doc) {
         setCatError(null);
         setConfirmPin(null);
@@ -623,16 +782,23 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
             }),
             React.createElement("button", { onClick: () => openCatForm(null), title: "Nouvelle catégorie", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
                 React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }),
-                "Catégorie")),
-        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 } }, visibleProducts.map((p) => (React.createElement("button", { key: p.id, onClick: () => openEditProduct(p), style: { display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 16px", background: PANEL, border: `1px solid ${LINE}` } },
-            React.createElement("div", { style: { width: 8, height: 32, borderRadius: 999, background: catColor(p.category) } }),
-            React.createElement("div", { style: { flex: 1 } },
-                React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: TEXT } }, p.name),
-                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED } },
-                    p.category,
-                    " \u00B7 marge ",
-                    fmt(p.price - (p.cost || 0)))),
-            React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(p.price)))))),
+                "Catégorie"),
+            React.createElement(ReorderButton, { active: reorder, onClick: () => setReorder((v) => !v) })),
+        React.createElement(ReorderGrid, {
+            items: visibleProducts,
+            active: reorder,
+            onReorder: reorderProducts,
+            gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 },
+            renderItem: (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) openEditProduct(p); }, style: { width: "100%", display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 16px", background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { width: 8, height: 32, borderRadius: 999, background: catColor(p.category) } }),
+                React.createElement("div", { style: { flex: 1 } },
+                    React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: TEXT } }, p.name),
+                    React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED } },
+                        p.category,
+                        " \u00B7 marge ",
+                        fmt(p.price - (p.cost || 0)))),
+                React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(p.price))),
+        }),
         editing && (React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16, background: "rgba(0,0,0,0.5)" } },
             React.createElement("div", { style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },

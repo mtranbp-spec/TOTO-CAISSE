@@ -1,12 +1,11 @@
-const CACHE_NAME = "toto-caisse-v1";
+const CACHE_NAME = "toto-caisse-v2";
 const ASSETS = [
-  "./",
-  "./index.html",
   "./manifest.json",
   "./icon.jpg",
   "https://unpkg.com/react@18/umd/react.production.min.js",
   "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
-  "https://unpkg.com/@babel/standalone/babel.min.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js",
 ];
 
 self.addEventListener("install", (event) => {
@@ -26,6 +25,24 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  const isPage = event.request.mode === "navigate" || event.request.url.endsWith("index.html") || event.request.url.endsWith("/");
+
+  if (isPage) {
+    // La page principale : toujours essayer le réseau en premier pour avoir la dernière version.
+    // Le cache ne sert que si le réseau est indisponible (vrai hors-ligne).
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Le reste (librairies, icône...) : cache en priorité, réseau en secours.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

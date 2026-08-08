@@ -30,6 +30,27 @@
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin onerror="showFatal('Impossible de charger React depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin onerror="showFatal('Impossible de charger React-DOM depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase — vérifie ta connexion internet.')"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase Firestore — vérifie ta connexion internet.')"></script>
+<script>
+  var firebaseConfig = {
+    apiKey: "AIzaSyCy1WTAXgD4cXH7gN9CZcbsnjj39iuVQQs",
+    authDomain: "toto-caisse.firebaseapp.com",
+    projectId: "toto-caisse",
+    storageBucket: "toto-caisse.firebasestorage.app",
+    messagingSenderId: "783805211415",
+    appId: "1:783805211415:web:957fc6ff70835f722fcd52"
+  };
+  try {
+    firebase.initializeApp(firebaseConfig);
+    window.db = firebase.firestore();
+    window.db.enablePersistence({ synchronizeTabs: true }).catch(function (err) {
+      console.warn("Persistance hors-ligne non activée :", err.code);
+    });
+  } catch (e) {
+    showFatal("Erreur de connexion à Firebase : " + e.message);
+  }
+</script>
 </head>
 <body>
 <div id="fallback" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center;color:#F3EAD9;font-family:sans-serif;">
@@ -116,27 +137,8 @@ function monthLabel(monthKey) {
     const [y, m] = monthKey.split("-").map(Number);
     return new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
 }
-/* ---------- Sauvegarde locale (remplace window.storage) ---------- */
-const store = {
-    get(key, fallback) {
-        try {
-            const raw = localStorage.getItem(key);
-            return raw ? JSON.parse(raw) : fallback;
-        }
-        catch (e) {
-            return fallback;
-        }
-    },
-    set(key, value) {
-        try {
-            localStorage.setItem(key, JSON.stringify(value));
-            return true;
-        }
-        catch (e) {
-            return false;
-        }
-    },
-};
+/* ---------- Firestore (synchronisation multi-appareils) ---------- */
+function getDb() { return window.db; }
 /* ---------- Icônes (SVG simples, pas de dépendance) ---------- */
 const Icon = {
     Plus: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
@@ -160,8 +162,9 @@ const Icon = {
 };
 /* ---------- App ---------- */
 function App() {
-    const [products, setProducts] = useState(() => store.get("pos_products", DEFAULT_PRODUCTS));
-    const [sales, setSales] = useState(() => store.get("pos_sales", []));
+    const [products, setProducts] = useState(DEFAULT_PRODUCTS);
+    const [sales, setSales] = useState([]);
+    const [syncStatus, setSyncStatus] = useState("connecting"); // connecting | live | error
     const [cart, setCart] = useState([]);
     const [activeCategory, setActiveCategory] = useState("Toutes");
     const [view, setView] = useState("pos");
@@ -171,8 +174,28 @@ function App() {
     const [form, setForm] = useState({ name: "", price: "", cost: "", category: "" });
     const toastTimer = useRef(null);
     useEffect(() => {
-        if (!localStorage.getItem("pos_products"))
-            store.set("pos_products", DEFAULT_PRODUCTS);
+        const db = getDb();
+        if (!db) {
+            setSyncStatus("error");
+            return;
+        }
+        // Seed initial products once if the collection is empty
+        db.collection("products").limit(1).get().then((snap) => {
+            if (snap.empty) {
+                const batch = db.batch();
+                DEFAULT_PRODUCTS.forEach((p) => {
+                    const { id, ...rest } = p;
+                    batch.set(db.collection("products").doc(id), rest);
+                });
+                batch.commit().catch(() => { });
+            }
+        }).catch(() => { });
+        const unsubProducts = db.collection("products").onSnapshot((snap) => {
+            setProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+            setSyncStatus("live");
+        }, () => setSyncStatus("error"));
+        const unsubSales = db.collection("sales").onSnapshot((snap) => setSales(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setSyncStatus("error"));
+        return () => { unsubProducts(); unsubSales(); };
     }, []);
     useEffect(() => {
         if ("serviceWorker" in navigator) {
@@ -276,20 +299,22 @@ function App() {
         if (cart.length === 0)
             return;
         const now = new Date();
+        const saleId = "s" + now.getTime();
         const sale = {
-            id: "s" + now.getTime(),
             timestamp: now.toISOString(),
             dateKey: todayKey(),
             items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, qty: it.qty })),
             total: cartTotal,
         };
-        const next = [...sales, sale];
-        setSales(next);
         setCart([]);
-        store.set("pos_sales", next);
         showToast(`Encaissé : ${fmt(sale.total)}`);
+        const db = getDb();
+        if (db) {
+            db.collection("sales").doc(saleId).set(sale).catch(() => {
+                showToast("⚠️ Pas de connexion — la vente sera envoyée dès le retour du réseau.");
+            });
+        }
     }
-    function saveProducts(next) { setProducts(next); store.set("pos_products", next); }
     function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture" }); setEditing("new"); }
     function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category }); setEditing(p.id); }
     function submitProductForm() {
@@ -299,17 +324,28 @@ function App() {
             showToast("Vérifie le nom, le prix et la catégorie.");
             return;
         }
+        const db = getDb();
+        const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() };
         if (editing === "new") {
-            saveProducts([...products, { id: "p" + Date.now(), name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() }]);
+            const id = "p" + Date.now();
+            if (db)
+                db.collection("products").doc(id).set(productData).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
             showToast("Produit ajouté");
         }
         else {
-            saveProducts(products.map((p) => p.id === editing ? { ...p, name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() } : p));
+            if (db)
+                db.collection("products").doc(editing).set(productData).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
             showToast("Produit modifié");
         }
         setEditing(null);
     }
-    function deleteProduct(id) { saveProducts(products.filter((p) => p.id !== id)); setEditing(null); showToast("Produit supprimé"); }
+    function deleteProduct(id) {
+        const db = getDb();
+        if (db)
+            db.collection("products").doc(id).delete().catch(() => showToast("⚠️ Suppression en attente de connexion..."));
+        setEditing(null);
+        showToast("Produit supprimé");
+    }
     return (React.createElement("div", { style: { background: BG, minHeight: "100vh" } },
         React.createElement("div", { className: "flex items-center justify-between", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
@@ -324,6 +360,7 @@ function App() {
                     React.createElement("span", { className: "font-display", style: { fontSize: 20, color: TEXT } }, "TOTO"),
                     React.createElement("span", { style: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT } }, "Since 2004"))),
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+                React.createElement("div", { title: syncStatus === "live" ? "Synchronisé" : syncStatus === "connecting" ? "Connexion..." : "Hors ligne", style: { width: 8, height: 8, borderRadius: 999, background: syncStatus === "live" ? ACCENT_GREEN : syncStatus === "connecting" ? GOLD : "#C2352A" } }),
                 React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Trend, { size: 16, color: GOLD }),
                     React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(todaysCA))),

@@ -32,6 +32,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin onerror="showFatal('Impossible de charger React-DOM depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase — vérifie ta connexion internet.')"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase Firestore — vérifie ta connexion internet.')"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase Auth — vérifie ta connexion internet.')"></script>
 <script>
   var firebaseConfig = {
     apiKey: "AIzaSyCy1WTAXgD4cXH7gN9CZcbsnjj39iuVQQs",
@@ -41,9 +42,20 @@
     messagingSenderId: "783805211415",
     appId: "1:783805211415:web:957fc6ff70835f722fcd52"
   };
+  // Compte de service unique partagé par la caisse. Le PIN saisi à l'ouverture
+  // sert de mot de passe pour ce compte. Les règles Firestore n'autorisent
+  // l'accès qu'à cette adresse précise.
+  var CAISSE_EMAIL = "mtranbp@gmail.com";
   try {
     firebase.initializeApp(firebaseConfig);
     window.db = firebase.firestore();
+    window.auth = firebase.auth();
+    window.CAISSE_EMAIL = CAISSE_EMAIL;
+    // La session reste ouverte après fermeture de l'appli : on ne redemande
+    // le PIN que si l'utilisateur se déconnecte explicitement.
+    window.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function (err) {
+      console.warn("Persistance de session non activée :", err.code);
+    });
     window.db.enablePersistence({ synchronizeTabs: true }).catch(function (err) {
       console.warn("Persistance hors-ligne non activée :", err.code);
     });
@@ -139,6 +151,7 @@ function monthLabel(monthKey) {
 }
 /* ---------- Firestore (synchronisation multi-appareils) ---------- */
 function getDb() { return window.db; }
+function getAuth() { return window.auth; }
 /* ---------- Icônes (SVG simples, pas de dépendance) ---------- */
 const Icon = {
     Plus: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
@@ -159,6 +172,9 @@ const Icon = {
         React.createElement("path", { d: "M12 20V10M18 20V4M6 20v-4", stroke: p.color || "#fff", strokeWidth: "2.2", strokeLinecap: "round" })),
     X: (p) => React.createElement("svg", { width: p.size || 18, height: p.size || 18, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M18 6 6 18M6 6l12 12", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Lock: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("rect", { x: "4", y: "11", width: "16", height: "10", rx: "2", stroke: p.color || "#fff", strokeWidth: "2" }),
+        React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
 };
 /* ---------- App ---------- */
 function App() {
@@ -367,7 +383,9 @@ function App() {
                 React.createElement("div", { style: { display: "flex", alignItems: "center", borderRadius: 999, padding: 4, background: PANEL } },
                     React.createElement(TabButton, { active: view === "pos", onClick: () => setView("pos") }, "Caisse"),
                     React.createElement(TabButton, { active: view === "stats", onClick: () => setView("stats"), icon: React.createElement(Icon.Bar, { size: 13 }) }, "Stats"),
-                    React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")))),
+                    React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")),
+                React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
+                    React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
         view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: products, categories: categories, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: (c) => catColor(c, categories) })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4 } },
@@ -493,8 +511,74 @@ function ManageView({ products, categories, editing, form, setForm, openNewProdu
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
                 editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit"))))));
 }
+/* ---------- Écran de connexion (PIN partagé) ---------- */
+function LoginView() {
+    const [pin, setPin] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState(null);
+    function messageFor(code) {
+        switch (code) {
+            case "auth/wrong-password":
+            case "auth/invalid-credential":
+            case "auth/invalid-login-credentials":
+                return "PIN incorrect.";
+            case "auth/user-not-found":
+                return "Le compte caisse n'existe pas encore côté Firebase.";
+            case "auth/too-many-requests":
+                return "Trop de tentatives. Réessaie dans quelques minutes.";
+            case "auth/network-request-failed":
+                return "Pas de connexion — impossible de vérifier le PIN.";
+            default:
+                return "Connexion impossible (" + code + ").";
+        }
+    }
+    function submit() {
+        const auth = getAuth();
+        if (!auth || busy || !pin)
+            return;
+        setBusy(true);
+        setError(null);
+        auth.signInWithEmailAndPassword(window.CAISSE_EMAIL, pin).catch((err) => {
+            setError(messageFor(err.code || "inconnu"));
+            setPin("");
+            setBusy(false);
+        });
+    }
+    return (React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: BG } },
+        React.createElement("div", { style: { width: "100%", maxWidth: 320, display: "flex", flexDirection: "column", alignItems: "center" } },
+            React.createElement("svg", { width: "64", height: "64", viewBox: "0 0 512 512", fill: "none" },
+                React.createElement("circle", { cx: "256", cy: "256", r: "200", stroke: ACCENT, strokeWidth: "18" }),
+                React.createElement("path", { d: "M170 210 C170 270 208 300 256 300 C304 300 342 270 342 210 Z", fill: ACCENT }),
+                React.createElement("ellipse", { cx: "256", cy: "300", rx: "30", ry: "8", fill: ACCENT }),
+                React.createElement("ellipse", { cx: "256", cy: "200", rx: "86", ry: "30", fill: TEXT }),
+                React.createElement("line", { x1: "290", y1: "185", x2: "340", y2: "95", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" }),
+                React.createElement("line", { x1: "305", y1: "192", x2: "360", y2: "105", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" })),
+            React.createElement("div", { className: "font-display", style: { fontSize: 26, marginTop: 12, color: TEXT } }, "TOTO"),
+            React.createElement("div", { style: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT, marginBottom: 28 } }, "Since 2004"),
+            React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, alignSelf: "flex-start" } }, "Code d'accès"),
+            React.createElement("input", { value: pin, type: "password", inputMode: "numeric", autoFocus: true, disabled: busy, onChange: (e) => setPin(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") submit(); }, style: { width: "100%", marginTop: 6, padding: "14px 16px", borderRadius: 12, fontSize: 20, letterSpacing: 6, textAlign: "center", background: PANEL, color: TEXT, border: `1px solid ${error ? ACCENT : LINE}` }, placeholder: "••••" }),
+            error && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 10, textAlign: "center" } }, error),
+            React.createElement("button", { onClick: submit, disabled: busy || !pin, className: "font-display", style: { width: "100%", marginTop: 16, padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, background: busy || !pin ? LINE : ACCENT_GREEN, color: busy || !pin ? TEXT_MUTED : "#fff" } }, busy ? "Vérification…" : "Ouvrir la caisse"))));
+}
+/* ---------- Racine : rien ne s'affiche tant qu'on n'est pas authentifié ---------- */
+function Root() {
+    const [user, setUser] = useState(undefined); // undefined = on ne sait pas encore
+    useEffect(() => {
+        const auth = getAuth();
+        if (!auth) {
+            setUser(null);
+            return;
+        }
+        return auth.onAuthStateChanged((u) => setUser(u));
+    }, []);
+    if (user === undefined)
+        return React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: BG, color: TEXT_MUTED, fontSize: 13 } }, "Vérification de la session…");
+    if (!user)
+        return React.createElement(LoginView, null);
+    return React.createElement(App, null);
+}
 try {
-    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
+    ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Root, null));
     window.__totoMounted = true;
     const fb = document.getElementById("fallback");
     if (fb)

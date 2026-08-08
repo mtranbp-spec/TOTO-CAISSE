@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// Règles Firestore — TOTO Caisse
+//
+// L'appli n'a qu'un seul compte : mtranbp@gmail.com.
+// Le PIN saisi à l'ouverture est le mot de passe de ce compte.
+//
+// On ne se contente PAS de "request.auth != null" : n'importe qui peut créer
+// un compte via l'API Firebase Auth depuis le navigateur. On vérifie donc
+// l'adresse exacte, sinon la protection serait cosmétique.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estCaisse() {
+      return request.auth != null
+          && request.auth.token.email == "mtranbp@gmail.com"
+          && request.auth.token.firebase.sign_in_provider == "password";
+    }
+
+    match /products/{productId} {
+      allow read, write: if estCaisse();
+    }
+
+    match /sales/{saleId} {
+      allow read, write: if estCaisse();
+    }
+
+    // Tout le reste est refusé par défaut.
+  }
+}

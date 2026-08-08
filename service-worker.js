@@ -1,4 +1,4 @@
-const CACHE_NAME = "toto-caisse-v2";
+const CACHE_NAME = "toto-caisse-v3";
 const ASSETS = [
   "./manifest.json",
   "./icon.jpg",
@@ -6,6 +6,7 @@ const ASSETS = [
   "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
 ];
 
 self.addEventListener("install", (event) => {

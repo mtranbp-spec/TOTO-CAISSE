@@ -534,6 +534,19 @@ function App() {
             batch.commit().catch(() => showToast("⚠️ Ordre non enregistré — pas de connexion."));
     }
     const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? orderedProducts : orderedProducts.filter((p) => p.category === activeCategory)), [orderedProducts, activeCategory]);
+    // Une section par catégorie, dans l'ordre que tu as choisi. Les catégories
+    // vides sont omises : une entête sans produit ne ferait qu'allonger la page.
+    const groupesProduits = useMemo(() => {
+        const g = categories.map((nom) => ({ nom, produits: orderedProducts.filter((p) => p.category === nom) })).filter((x) => x.produits.length > 0);
+        const orphelins = orderedProducts.filter((p) => !p.category || categories.indexOf(p.category) === -1);
+        if (orphelins.length)
+            g.push({ nom: "Sans catégorie", produits: orphelins });
+        return g;
+    }, [categories, orderedProducts]);
+    const tuileProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) addToCart(p); }, style: { width: "100%", textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
+        React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: colorOf(p.category) } }),
+        React.createElement("div", { className: "font-display", style: { fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT } }, p.name),
+        React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price)));
     const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
     const todaysCA = useMemo(() => {
@@ -706,16 +719,29 @@ function App() {
                         renderItem: (it, rangement) => React.createElement(CategoryTab, { label: it.id, active: activeCategory === it.id, color: colorOf(it.id), onClick: () => { if (!rangement) setActiveCategory(it.id); } }),
                     }),
                     React.createElement(ReorderButton, { active: reorderPos, onClick: () => setReorderPos((v) => !v) })),
-                React.createElement(ReorderGrid, {
-                    items: visibleProducts,
-                    active: reorderPos,
-                    onReorder: reorderProducts,
-                    gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 },
-                    renderItem: (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) addToCart(p); }, style: { width: "100%", textAlign: "left", borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
-                        React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 12, background: colorOf(p.category) } }),
-                        React.createElement("div", { className: "font-display", style: { fontSize: 15, lineHeight: 1.2, marginBottom: 8, color: TEXT } }, p.name),
-                        React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))),
-                })),
+                // En vue « Toutes », on empile une section par catégorie plutôt
+                // qu'une grille unique : en plein service, l'intertitre coloré
+                // évite de lire chaque nom pour retrouver un plat.
+                activeCategory === "Toutes"
+                    ? React.createElement("div", null, groupesProduits.map((g) => React.createElement("div", { key: g.nom, style: { marginBottom: 22 } },
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 } },
+                            React.createElement("span", { style: { width: 10, height: 10, borderRadius: 999, flexShrink: 0, background: colorOf(g.nom) } }),
+                            React.createElement("span", { className: "font-display", style: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", whiteSpace: "nowrap", color: TEXT_MUTED } }, g.nom),
+                            React.createElement("span", { style: { flex: 1, height: 1, background: LINE } })),
+                        React.createElement(ReorderGrid, {
+                            items: g.produits,
+                            active: reorderPos,
+                            onReorder: reorderProducts,
+                            gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 },
+                            renderItem: tuileProduit,
+                        }))))
+                    : React.createElement(ReorderGrid, {
+                        items: visibleProducts,
+                        active: reorderPos,
+                        onReorder: reorderProducts,
+                        gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 },
+                        renderItem: tuileProduit,
+                    })),
             React.createElement("div", { style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
                 React.createElement("div", { style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
                     React.createElement("div", { style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },

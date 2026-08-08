@@ -104,7 +104,7 @@
 
 <script>
 "use strict";
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useLayoutEffect, useMemo, useRef } = React;
 /* ---------- Design tokens (identité TOTO) ---------- */
 const BG = "#161311";
 const PANEL = "#221D1A";
@@ -199,9 +199,9 @@ const Icon = {
 function ReorderGrid({ items, active, gridStyle, renderItem, onReorder }) {
     const [ids, setIds] = useState(null);
     const [dragId, setDragId] = useState(null);
-    const [offset, setOffset] = useState({ x: 0, y: 0 });
     const nodes = useRef(new Map());
-    const startPt = useRef(null);
+    const drag = useRef(null);
+    const flip = useRef(null);
     const liste = useMemo(() => {
         if (!ids)
             return items;
@@ -211,14 +211,41 @@ function ReorderGrid({ items, active, gridStyle, renderItem, onReorder }) {
         items.forEach((it) => { if (ids.indexOf(it.id) === -1) rangés.push(it); });
         return rangés;
     }, [items, ids]);
-    // En sortant du mode réorganisation, on repart de l'ordre réel en base.
-    useEffect(() => { if (!active) { setIds(null); setDragId(null); } }, [active]);
-    function terminer() {
-        if (dragId && ids)
-            onReorder(ids);
-        setDragId(null);
-        startPt.current = null;
-        setOffset({ x: 0, y: 0 });
+    useEffect(() => { if (!active) { setIds(null); setDragId(null); drag.current = null; } }, [active]);
+    // FLIP : après un changement d'ordre, on replace visuellement chaque voisine
+    // à son ancienne position puis on la laisse rejoindre la nouvelle. Sans ça
+    // la grille se réorganiserait d'un coup, ce qui donne l'impression de saut.
+    useLayoutEffect(() => {
+        const avant = flip.current;
+        if (!avant)
+            return;
+        flip.current = null;
+        nodes.current.forEach((el, id) => {
+            if (!el)
+                return;
+            const apres = el.getBoundingClientRect();
+            if (drag.current)
+                drag.current.rects.set(id, apres);
+            if (id === dragId)
+                return;
+            const a = avant.get(id);
+            if (!a)
+                return;
+            const dx = a.left - apres.left, dy = a.top - apres.top;
+            if (!dx && !dy)
+                return;
+            el.style.transition = "none";
+            el.style.transform = `translate(${dx}px, ${dy}px)`;
+            requestAnimationFrame(() => {
+                el.style.transition = "transform 180ms cubic-bezier(0.2, 0, 0, 1)";
+                el.style.transform = "";
+            });
+        });
+    });
+    function mesurer() {
+        const m = new Map();
+        nodes.current.forEach((el, id) => { if (el) m.set(id, el.getBoundingClientRect()); });
+        return m;
     }
     function onDown(e, id) {
         if (!active)
@@ -227,59 +254,90 @@ function ReorderGrid({ items, active, gridStyle, renderItem, onReorder }) {
             e.currentTarget.setPointerCapture(e.pointerId);
         }
         catch (err) { }
-        startPt.current = { x: e.clientX, y: e.clientY };
+        const rects = mesurer();
+        drag.current = { id, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, rects, raf: 0 };
         setDragId(id);
         setIds(liste.map((i) => i.id));
-        setOffset({ x: 0, y: 0 });
+        const el = nodes.current.get(id);
+        if (el) {
+            el.style.transition = "none";
+            el.style.zIndex = "30";
+            el.style.transform = "scale(1.05)";
+        }
     }
     function onMove(e) {
-        if (!dragId || !startPt.current)
+        const d = drag.current;
+        if (!d)
             return;
-        const courant = ids || liste.map((i) => i.id);
-        let cible = null;
-        nodes.current.forEach((el, id) => {
-            if (!el || id === dragId || cible)
+        d.x = e.clientX;
+        d.y = e.clientY;
+        // Une seule mise à jour par image écran : les événements pointer
+        // arrivent bien plus vite que le rafraîchissement de l'affichage.
+        if (d.raf)
+            return;
+        d.raf = requestAnimationFrame(() => {
+            d.raf = 0;
+            if (!drag.current)
                 return;
-            const r = el.getBoundingClientRect();
-            if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)
-                cible = id;
-        });
-        if (cible) {
-            const de = courant.indexOf(dragId);
-            const vers = courant.indexOf(cible);
-            if (de !== -1 && vers !== -1 && de !== vers) {
-                const suivant = courant.slice();
+            const el = nodes.current.get(d.id);
+            if (el)
+                el.style.transform = `translate(${d.x - d.startX}px, ${d.y - d.startY}px) scale(1.05)`;
+            let cible = null;
+            d.rects.forEach((r, id) => {
+                if (id === d.id || cible)
+                    return;
+                if (d.x >= r.left && d.x <= r.right && d.y >= r.top && d.y <= r.bottom)
+                    cible = id;
+            });
+            if (!cible)
+                return;
+            setIds((courant) => {
+                const base = courant || liste.map((i) => i.id);
+                const de = base.indexOf(d.id), vers = base.indexOf(cible);
+                if (de === -1 || vers === -1 || de === vers)
+                    return base;
+                flip.current = mesurer();
+                const suivant = base.slice();
                 suivant.splice(vers, 0, suivant.splice(de, 1)[0]);
-                setIds(suivant);
-                // On recale l'origine sur la position actuelle : sans ça, la
-                // tuile ferait un bond au moment où les voisines se décalent.
-                startPt.current = { x: e.clientX, y: e.clientY };
-                setOffset({ x: 0, y: 0 });
-                return;
-            }
-        }
-        setOffset({ x: e.clientX - startPt.current.x, y: e.clientY - startPt.current.y });
+                d.startX = d.x;
+                d.startY = d.y;
+                if (el)
+                    el.style.transform = "scale(1.05)";
+                return suivant;
+            });
+        });
     }
-    return React.createElement("div", { style: gridStyle }, liste.map((it) => {
-        const enCours = dragId === it.id;
-        return React.createElement("div", {
-            key: it.id,
-            ref: (el) => { if (el) nodes.current.set(it.id, el); else nodes.current.delete(it.id); },
-            className: active ? (enCours ? "toto-drag" : "toto-drag toto-wiggle") : undefined,
-            onPointerDown: (e) => onDown(e, it.id),
-            onPointerMove: onMove,
-            onPointerUp: terminer,
-            onPointerCancel: terminer,
-            style: {
-                transform: enCours ? `translate(${offset.x}px, ${offset.y}px) scale(1.04)` : undefined,
-                zIndex: enCours ? 20 : undefined,
-                position: enCours ? "relative" : undefined,
-                opacity: enCours ? 0.92 : 1,
-                transition: enCours ? "none" : "transform 0.15s ease",
-                cursor: active ? "grab" : undefined,
-            },
-        }, renderItem(it, active));
-    }));
+    function terminer() {
+        const d = drag.current;
+        if (!d)
+            return;
+        if (d.raf)
+            cancelAnimationFrame(d.raf);
+        const el = nodes.current.get(d.id);
+        if (el) {
+            el.style.transition = "transform 160ms ease";
+            el.style.transform = "";
+            el.style.zIndex = "";
+        }
+        drag.current = null;
+        setDragId(null);
+        if (ids)
+            onReorder(ids);
+    }
+    return React.createElement("div", { style: gridStyle }, liste.map((it) => React.createElement("div", {
+        key: it.id,
+        ref: (el) => { if (el) nodes.current.set(it.id, el); else nodes.current.delete(it.id); },
+        className: active ? "toto-drag" : undefined,
+        onPointerDown: (e) => onDown(e, it.id),
+        onPointerMove: onMove,
+        onPointerUp: terminer,
+        onPointerCancel: terminer,
+        style: { flexShrink: 0, cursor: active ? "grab" : undefined, willChange: active ? "transform" : undefined },
+    },
+        // Le tremblement vit sur un conteneur interne : une animation CSS
+        // écrase les transformations en ligne, elle entrerait sinon en
+        // conflit avec le déplacement et le FLIP.
+        React.createElement("div", { className: active && dragId !== it.id ? "toto-wiggle" : undefined }, renderItem(it, active)))));
 }
 /* ---------- App ---------- */
 function App() {
@@ -388,6 +446,26 @@ function App() {
         }
         const ordre = sortedCatDocs.length ? Math.max(...sortedCatDocs.map((c) => c.order ?? 0)) + 1 : 0;
         return db.collection("categories").doc("c" + Date.now()).set({ name: propre, color: couleur, order: ordre });
+    }
+    function reorderCategories(noms) {
+        const db = getDb();
+        if (!db)
+            return;
+        const parNom = {};
+        sortedCatDocs.forEach((c) => { parNom[c.name] = c; });
+        // Une catégorie héritée d'un produit n'a pas de document : elle reste
+        // affichée mais ne participe pas au classement enregistré.
+        const docs = noms.map((n) => parNom[n]).filter(Boolean);
+        const batch = db.batch();
+        let change = false;
+        docs.forEach((d, i) => {
+            if (d.order !== i) {
+                batch.update(db.collection("categories").doc(d.id), { order: i });
+                change = true;
+            }
+        });
+        if (change)
+            batch.commit().catch(() => showToast("⚠️ Ordre des catégories non enregistré."));
     }
     function deleteCategory(id) {
         const db = getDb();
@@ -600,11 +678,17 @@ function App() {
                     React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-                    categories.map((c) => React.createElement(CategoryTab, { key: c, label: c, active: activeCategory === c, color: colorOf(c), onClick: () => setActiveCategory(c) })),
+                    React.createElement(ReorderGrid, {
+                        items: categories.map((c) => ({ id: c })),
+                        active: reorderPos,
+                        onReorder: reorderCategories,
+                        gridStyle: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
+                        renderItem: (it, rangement) => React.createElement(CategoryTab, { label: it.id, active: activeCategory === it.id, color: colorOf(it.id), onClick: () => { if (!rangement) setActiveCategory(it.id); } }),
+                    }),
                     React.createElement(ReorderButton, { active: reorderPos, onClick: () => setReorderPos((v) => !v) })),
                 React.createElement(ReorderGrid, {
                     items: visibleProducts,
@@ -700,13 +784,18 @@ function StatsView({ period, setPeriod, currentLabel, trend, stats }) {
                     React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: TEXT } }, p.qty),
                     React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca)))))))))));
 }
-function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts }) {
+function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
     const [activeCategory, setActiveCategory] = useState("Toutes");
     const [catForm, setCatForm] = useState(null); // { id, name, color } — id null = création
     const [catBusy, setCatBusy] = useState(false);
     const [catError, setCatError] = useState(null);
     const [confirmPin, setConfirmPin] = useState(null); // saisie du code avant suppression
     const [reorder, setReorder] = useState(false);
+    const [catLibre, setCatLibre] = useState(false);
+    // On rouvre toujours le formulaire produit sur les pastilles. Le champ
+    // libre ne réapparaît que si la catégorie du produit n'existe plus.
+    useEffect(() => { setCatLibre(false); }, [editing]);
+    const montrerLibre = catLibre || (!!form.category && categories.indexOf(form.category) === -1);
     function openCatForm(doc) {
         setCatError(null);
         setConfirmPin(null);
@@ -767,18 +856,25 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
                 " Nouveau produit")),
         React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
             React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-            categories.map((c) => {
-                const doc = catDocs.find((d) => d.name === c);
-                const actif = activeCategory === c;
-                const couleur = catColor(c);
-                return React.createElement("div", { key: c, style: { flexShrink: 0, display: "flex", alignItems: "center", borderRadius: 999, background: actif ? couleur : PANEL, border: `1px solid ${actif ? couleur : LINE}` } },
-                    React.createElement("button", { onClick: () => setActiveCategory(c), style: { padding: "8px 4px 8px 16px", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: actif ? "#fff" : TEXT_MUTED } }, c),
-                    // Sans document associé (catégorie héritée d'un produit), il n'y
-                    // a rien à modifier : on n'affiche pas le crayon.
-                    doc
-                        ? React.createElement("button", { onClick: () => openCatForm(doc), title: `Modifier « ${c} »`, style: { display: "flex", alignItems: "center", padding: "8px 12px 8px 6px", background: "transparent" } },
-                            React.createElement(Icon.Pencil, { size: 13, color: actif ? "#fff" : TEXT_MUTED }))
-                        : React.createElement("span", { style: { paddingRight: 12 } }));
+            React.createElement(ReorderGrid, {
+                items: categories.map((c) => ({ id: c })),
+                active: reorder,
+                onReorder: reorderCategories,
+                gridStyle: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
+                renderItem: (it, rangement) => {
+                    const c = it.id;
+                    const doc = catDocs.find((d) => d.name === c);
+                    const actif = activeCategory === c;
+                    const couleur = catColor(c);
+                    return React.createElement("div", { style: { flexShrink: 0, display: "flex", alignItems: "center", borderRadius: 999, background: actif ? couleur : PANEL, border: `1px solid ${actif ? couleur : LINE}` } },
+                        React.createElement("button", { onClick: () => { if (!rangement) setActiveCategory(c); }, style: { padding: "8px 4px 8px 16px", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: actif ? "#fff" : TEXT_MUTED } }, c),
+                        // Sans document associé (catégorie héritée d'un produit), il n'y
+                        // a rien à modifier : on n'affiche pas le crayon.
+                        doc && !rangement
+                            ? React.createElement("button", { onClick: () => openCatForm(doc), title: `Modifier « ${c} »`, style: { display: "flex", alignItems: "center", padding: "8px 12px 8px 6px", background: "transparent" } },
+                                React.createElement(Icon.Pencil, { size: 13, color: actif ? "#fff" : TEXT_MUTED }))
+                            : React.createElement("span", { style: { paddingRight: 12 } }));
+                },
             }),
             React.createElement("button", { onClick: () => openCatForm(null), title: "Nouvelle catégorie", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
                 React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }),
@@ -812,8 +908,15 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
                 React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Co\u00FBt d'achat (F CFP)"),
                 React.createElement("input", { value: form.cost, onChange: (e) => setForm({ ...form, cost: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : 500", inputMode: "numeric" }),
                 React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Cat\u00E9gorie"),
-                React.createElement("input", { value: form.category, onChange: (e) => setForm({ ...form, category: e.target.value }), list: "cats", style: { width: "100%", marginBottom: 4, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Friture" }),
-                React.createElement("datalist", { id: "cats" }, categories.map((c) => React.createElement("option", { key: c, value: c }))),
+                // Vrai <select> : il liste toujours TOUTES les catégories.
+                // Le <datalist> précédent filtrait ses suggestions sur le
+                // contenu du champ — un produit déjà en « Friture » ne voyait
+                // donc plus jamais les autres.
+                React.createElement("select", { value: montrerLibre ? "__autre__" : (form.category || ""), onChange: (e) => { const v = e.target.value; if (v === "__autre__") { setCatLibre(true); setForm({ ...form, category: "" }); } else { setCatLibre(false); setForm({ ...form, category: v }); } }, style: { width: "100%", marginTop: 4, marginBottom: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                    React.createElement("option", { value: "", disabled: true }, "Choisir une catégorie…"),
+                    categories.map((c) => React.createElement("option", { key: c, value: c }, c)),
+                    React.createElement("option", { value: "__autre__" }, "+ Autre catégorie…")),
+                montrerLibre && React.createElement("input", { value: form.category, autoFocus: true, onChange: (e) => setForm({ ...form, category: e.target.value }), style: { width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Nom de la nouvelle catégorie" }),
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
                 editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit")))),
         catForm && (React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.5)" } },

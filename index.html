@@ -17,6 +17,7 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root { --toto-tabbar: 60px; }
   html, body { margin: 0; padding: 0; background: #161311; overscroll-behavior: none; }
   body { font-family: 'Inter', sans-serif; color: #F3EAD9; }
   .font-display { font-family: 'Fredoka', sans-serif; }
@@ -40,7 +41,25 @@
      tombe naturellement. Les !important sont nécessaires pour l'emporter sur
      les styles en ligne des composants. */
   @media (max-width: 640px) {
-    #root { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+    /* Empilement par le bas : onglets, puis ticket au-dessus. Le contenu
+       réserve la hauteur des deux pour ne jamais passer dessous. */
+    #root { padding-bottom: calc(var(--toto-tabbar) + env(safe-area-inset-bottom)); }
+    /* Seule la vue Caisse réserve la hauteur du ticket : Stats et Produits
+       n'en affichent pas et n'auraient qu'un vide en bas. */
+    .toto-pos-col { padding-bottom: calc(33vh + 16px) !important; }
+    .toto-ticket {
+      position: fixed !important;
+      left: 0; right: 0;
+      bottom: calc(var(--toto-tabbar) + env(safe-area-inset-bottom));
+      height: 33vh;
+      width: auto !important;
+      padding: 8px !important;
+      z-index: 35;
+    }
+    .toto-ticket-card { height: 100%; }
+    /* min-height:0 est indispensable : sans lui un enfant flex refuse de
+       rétrécir sous sa hauteur de contenu et le défilement ne s'active pas. */
+    .toto-ticket-items { flex: 1; min-height: 0; max-height: none !important; }
     .toto-tabs {
       position: fixed !important;
       left: 0; right: 0; bottom: 0;
@@ -58,7 +77,7 @@
       font-size: 13px !important;
     }
     /* Le message de confirmation doit rester au-dessus de la barre. */
-    .toto-toast { bottom: calc(76px + env(safe-area-inset-bottom)) !important; }
+    .toto-toast { bottom: calc(33vh + var(--toto-tabbar) + env(safe-area-inset-bottom) + 16px) !important; }
   }
 </style>
 
@@ -758,7 +777,7 @@ function App() {
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
         view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
-            React.createElement("div", { style: { flex: 1, minWidth: 280, padding: 16 } },
+            React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
                     React.createElement(ReorderGrid, {
@@ -792,8 +811,8 @@ function App() {
                         gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 },
                         renderItem: tuileProduit,
                     })),
-            React.createElement("div", { style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
-                React.createElement("div", { style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
+            React.createElement("div", { className: "toto-ticket", style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
+                React.createElement("div", { className: "toto-ticket-card", style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
                     React.createElement("div", { style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },
                         React.createElement(Icon.List, { size: 16, color: TEXT_MUTED }),
                         React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT } }, "Ticket"),
@@ -801,7 +820,7 @@ function App() {
                             cartCount,
                             " article",
                             cartCount > 1 ? "s" : "")),
-                    React.createElement("div", { style: { padding: "8px 16px", maxHeight: 360, overflowY: "auto" } }, cart.length === 0 ? (React.createElement("div", { style: { fontSize: 12, textAlign: "center", padding: "40px 0", color: TEXT_MUTED } },
+                    React.createElement("div", { className: "toto-ticket-items", style: { padding: "8px 16px", maxHeight: 360, overflowY: "auto" } }, cart.length === 0 ? (React.createElement("div", { style: { fontSize: 12, textAlign: "center", padding: "40px 0", color: TEXT_MUTED } },
                         "Le ticket est vide.",
                         React.createElement("br", null),
                         "Touche un produit pour commencer.")) : cart.map((it) => (React.createElement("div", { key: it.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${LINE}` } },

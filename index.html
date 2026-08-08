@@ -118,6 +118,11 @@ const GOLD = "#E8B44A";
 const CATEGORY_COLORS = { "Friture": ACCENT, "Plats chauds": ACCENT_GREEN };
 const FALLBACK_COLORS = [ACCENT, ACCENT_GREEN, GOLD, "#4B7BE1", "#B85AE1"];
 // Couleurs proposées au choix lors de la création/modification d'une catégorie.
+// TGC (Nouvelle-Calédonie). Les prix saisis sont TTC : la taxe est donc
+// EXTRAITE du prix, jamais ajoutée par-dessus.
+const TAUX_TGC = [0, 3, 6, 11, 22];
+function htDepuisTTC(ttc, taux) { return ttc / (1 + (taux || 0) / 100); }
+function tgcDepuisTTC(ttc, taux) { return ttc - htDepuisTTC(ttc, taux); }
 const PALETTE = [ACCENT, ACCENT_GREEN, GOLD, "#4B7BE1", "#B85AE1", "#E8763A", "#3AA8E8", "#8AC926"];
 function catColor(cat, cats) {
     if (CATEGORY_COLORS[cat])
@@ -350,7 +355,7 @@ function App() {
     const [statsPeriod, setStatsPeriod] = useState("jour");
     const [toast, setToast] = useState(null);
     const [editing, setEditing] = useState(null);
-    const [form, setForm] = useState({ name: "", price: "", cost: "", category: "" });
+    const [form, setForm] = useState({ name: "", price: "", cost: "", category: "", tgc: 0 });
     const [catDocs, setCatDocs] = useState([]);
     const [catsLoaded, setCatsLoaded] = useState(false);
     const [reorderPos, setReorderPos] = useState(false);
@@ -549,6 +554,21 @@ function App() {
         React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price)));
     const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
     const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
+    // Ventilation de la TGC par taux : un ticket peut mélanger des articles
+    // taxés différemment (un plat et une boisson, par exemple).
+    const ventilationTgc = useMemo(() => {
+        const m = new Map();
+        cart.forEach((it) => {
+            const taux = it.tgc || 0;
+            const e = m.get(taux) || { taux, ttc: 0 };
+            e.ttc += it.price * it.qty;
+            m.set(taux, e);
+        });
+        return Array.from(m.values())
+            .map((e) => ({ taux: e.taux, ttc: e.ttc, ht: htDepuisTTC(e.ttc, e.taux), tgc: tgcDepuisTTC(e.ttc, e.taux) }))
+            .sort((a, b) => a.taux - b.taux);
+    }, [cart]);
+    const totalTGC = useMemo(() => ventilationTgc.reduce((s, e) => s + e.tgc, 0), [ventilationTgc]);
     const todaysCA = useMemo(() => {
         const tk = todayKey();
         return sales.filter((s) => s.dateKey === tk).reduce((sum, s) => sum + s.total, 0);
@@ -559,7 +579,10 @@ function App() {
         return m;
     }, [products]);
     function marginOfSale(sale) {
-        return sale.items.reduce((sum, it) => sum + (it.price - (costLookup[it.id] || 0)) * it.qty, 0);
+        // La TGC encaissée n'appartient pas au commerçant : la marge se calcule
+        // sur le hors-taxe. Les ventes antérieures n'ont pas de taux, donc
+        // hors-taxe = TTC et leurs chiffres restent inchangés.
+        return sale.items.reduce((sum, it) => sum + (htDepuisTTC(it.price, it.tgc) - (costLookup[it.id] || 0)) * it.qty, 0);
     }
     const statsData = useMemo(() => {
         const tk = todayKey();
@@ -624,7 +647,7 @@ function App() {
             const existing = prev.find((it) => it.id === product.id);
             if (existing)
                 return prev.map((it) => (it.id === product.id ? { ...it, qty: it.qty + 1 } : it));
-            return [...prev, { id: product.id, name: product.name, price: product.price, qty: 1 }];
+            return [...prev, { id: product.id, name: product.name, price: product.price, tgc: product.tgc || 0, qty: 1 }];
         });
     }
     function changeQty(id, delta) {
@@ -640,7 +663,9 @@ function App() {
         const sale = {
             timestamp: now.toISOString(),
             dateKey: todayKey(),
-            items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, qty: it.qty })),
+            // On fige le taux dans la vente : un changement de TGC plus tard ne doit
+            // pas réécrire l'histoire des tickets déjà encaissés.
+            items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, tgc: it.tgc || 0, qty: it.qty })),
             total: cartTotal,
         };
         setCart([]);
@@ -652,8 +677,8 @@ function App() {
             });
         }
     }
-    function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture" }); setEditing("new"); }
-    function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category }); setEditing(p.id); }
+    function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture", tgc: 0 }); setEditing("new"); }
+    function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category, tgc: p.tgc || 0 }); setEditing(p.id); }
     function submitProductForm() {
         const priceNum = parseFloat(String(form.price).replace(",", "."));
         const costNum = parseFloat(String(form.cost).replace(",", ".")) || 0;
@@ -662,7 +687,7 @@ function App() {
             return;
         }
         const db = getDb();
-        const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim() };
+        const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim(), tgc: Number(form.tgc) || 0 };
         if (editing === "new") {
             const id = "p" + Date.now();
             if (db)
@@ -769,8 +794,20 @@ function App() {
                         React.createElement("button", { onClick: () => removeFromCart(it.id), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", marginLeft: 4 } },
                             React.createElement(Icon.Trash, { size: 13, color: TEXT_MUTED })))))),
                     React.createElement("div", { style: { padding: "12px 16px 16px", borderTop: `1px dashed ${LINE}` } },
+                        // Le détail TGC n'apparaît que s'il y a de la taxe :
+                        // tant que les taux sont à 0, le ticket reste inchangé.
+                        totalTGC > 0 && React.createElement("div", { style: { marginBottom: 10, paddingBottom: 10, borderBottom: `1px dashed ${LINE}` } },
+                            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
+                                React.createElement("span", null, "Total HT"),
+                                React.createElement("span", { className: "tabnum" }, fmt(cartTotal - totalTGC))),
+                            ventilationTgc.filter((e) => e.taux > 0).map((e) => React.createElement("div", { key: e.taux, style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
+                                React.createElement("span", null, "TGC " + e.taux + " % sur " + fmt(e.ht)),
+                                React.createElement("span", { className: "tabnum" }, fmt(e.tgc)))),
+                            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: TEXT } },
+                                React.createElement("span", null, "Dont TGC"),
+                                React.createElement("span", { className: "tabnum" }, fmt(totalTGC)))),
                         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 } },
-                            React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL"),
+                            React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL TTC"),
                             React.createElement("span", { className: "tabnum font-display", style: { fontSize: 24, color: GOLD } }, fmt(cartTotal))),
                         React.createElement("button", { onClick: checkout, disabled: cart.length === 0, className: "font-display", style: { width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, marginBottom: 8, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff", opacity: cart.length === 0 ? 0.6 : 1 } }, "Encaisser"),
                         cart.length > 0 && React.createElement("button", { onClick: clearCart, style: { width: "100%", padding: "8px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider le ticket")))))),
@@ -984,6 +1021,21 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
                     categories.map((c) => React.createElement("option", { key: c, value: c }, c)),
                     React.createElement("option", { value: "__autre__" }, "+ Autre catégorie…")),
                 montrerLibre && React.createElement("input", { value: form.category, autoFocus: true, onChange: (e) => setForm({ ...form, category: e.target.value }), style: { width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Nom de la nouvelle catégorie" }),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "TGC"),
+                // Cinq taux seulement : des pastilles vont plus vite qu'une liste.
+                React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 } }, TAUX_TGC.map((t) => {
+                    const choisi = (Number(form.tgc) || 0) === t;
+                    return React.createElement("button", { key: t, onClick: () => setForm({ ...form, tgc: t }), style: { padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: choisi ? ACCENT_GREEN : BG, color: choisi ? "#fff" : TEXT_MUTED, border: `1px solid ${choisi ? ACCENT_GREEN : LINE}` } }, t + " %");
+                })),
+                // Rappel du calcul : le prix saisi est TTC, la taxe en est extraite.
+                (() => {
+                    const pv = parseFloat(String(form.price).replace(",", "."));
+                    const tx = Number(form.tgc) || 0;
+                    if (!isFinite(pv) || pv <= 0 || tx === 0)
+                        return null;
+                    return React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 8 } },
+                        "Prix TTC " + fmt(pv) + " → " + fmt(htDepuisTTC(pv, tx)) + " HT + " + fmt(tgcDepuisTTC(pv, tx)) + " de TGC");
+                })(),
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
                 editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit")))),
         catForm && (React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.5)" } },

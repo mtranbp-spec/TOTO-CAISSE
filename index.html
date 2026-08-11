@@ -280,6 +280,10 @@ async function chargerLogo() {
 // toLocaleString("fr-FR") separe les milliers par une espace fine insecable
 // (U+202F) que les polices standard du PDF rendent comme une barre oblique :
 // « 45 000 F » devenait « 45/000 F ». On la remplace par une espace normale.
+// Comparaison souple : « the glace » doit trouver « Thé Glacé ».
+function normaliser(t) {
+    return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
 function fmtPdf(n) { return fmt(n).replace(/[\u202F\u00A0]/g, " "); }
 function numeroSuivant(devisExistants) {
     const annee = new Date().getFullYear();
@@ -1340,18 +1344,36 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
     const [lignes, setLignes] = useState([]);
     const [validite, setValidite] = useState(30);
     const [note, setNote] = useState("");
-    const [choix, setChoix] = useState("");
     const [libre, setLibre] = useState({ name: "", price: "", tgc: 6 });
-    const [busy, setBusy] = useState(false);
-    const totalTTC = useMemo(() => lignes.reduce((s, l) => s + l.price * l.qty, 0), [lignes]);
-    const vent = useMemo(() => ventiler(lignes), [lignes]);
-    const totalTGC = useMemo(() => vent.reduce((s, e) => s + e.tgc, 0), [vent]);
-    const champ = { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
-    const label = { fontSize: 12, color: TEXT_MUTED };
-    function ajouterProduit() {
-        const p = products.find((x) => x.id === choix);
-        if (!p)
-            return;
+    const [recherche, setRecherche] = useState("");
+    const [suggClient, setSuggClient] = useState(false);
+    // Le carnet d'adresses se déduit des devis déjà émis : la fiche la plus
+    // récente d'une société fait foi, pour que corriger un numéro se propage.
+    const clientsConnus = useMemo(() => {
+        const par = new Map();
+        quotes.slice()
+            .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+            .forEach((d) => {
+                const c = d.client || {};
+                const cle = normaliser(c.societe || c.nom);
+                if (cle)
+                    par.set(cle, { societe: c.societe || "", nom: c.nom || "", tel: c.tel || "", email: c.email || "" });
+            });
+        return Array.from(par.values()).sort((a, b) => String(a.societe || a.nom).localeCompare(String(b.societe || b.nom)));
+    }, [quotes]);
+    const clientsFiltres = useMemo(() => {
+        const q = normaliser(client.societe);
+        if (!suggClient)
+            return [];
+        return clientsConnus.filter((c) => !q || normaliser(c.societe).indexOf(q) !== -1 || normaliser(c.nom).indexOf(q) !== -1).slice(0, 6);
+    }, [clientsConnus, client.societe, suggClient]);
+    const produitsFiltres = useMemo(() => {
+        const q = normaliser(recherche);
+        if (!q)
+            return [];
+        return products.filter((p) => normaliser(p.name).indexOf(q) !== -1).slice(0, 8);
+    }, [products, recherche]);
+    function ajouterLigne(p) {
         setLignes((prev) => {
             const i = prev.findIndex((l) => l.id === p.id);
             if (i !== -1) {
@@ -1362,6 +1384,12 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
             return [...prev, { id: p.id, name: p.name, price: p.price, tgc: p.tgc || 0, qty: 1 }];
         });
     }
+    const [busy, setBusy] = useState(false);
+    const totalTTC = useMemo(() => lignes.reduce((s, l) => s + l.price * l.qty, 0), [lignes]);
+    const vent = useMemo(() => ventiler(lignes), [lignes]);
+    const totalTGC = useMemo(() => vent.reduce((s, e) => s + e.tgc, 0), [vent]);
+    const champ = { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
+    const label = { fontSize: 12, color: TEXT_MUTED };
     function ajouterLibre() {
         const pv = parseFloat(String(libre.price).replace(",", "."));
         if (!libre.name.trim() || isNaN(pv) || pv < 0) {
@@ -1415,7 +1443,12 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                 React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 } },
                     React.createElement("div", null,
                         React.createElement("label", { style: label }, "Société"),
-                        React.createElement("input", { value: client.societe, onChange: (e) => setClient({ ...client, societe: e.target.value }), style: champ, placeholder: "Ex : Mairie de Nouméa" })),
+                        React.createElement("input", { value: client.societe, onFocus: () => setSuggClient(true), onChange: (e) => { setSuggClient(true); setClient({ ...client, societe: e.target.value }); }, style: { ...champ, marginBottom: clientsFiltres.length ? 0 : 10 }, placeholder: "Ex : Mairie de Nouméa" }),
+                        // Suggestions issues des devis passés : choisir une société
+                        // remplit d'un coup contact, téléphone et e-mail.
+                        clientsFiltres.length > 0 && React.createElement("div", { style: { marginTop: 4, marginBottom: 10, borderRadius: 8, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } }, clientsFiltres.map((c, i) => React.createElement("button", { key: i, onClick: () => { setClient({ societe: c.societe, nom: c.nom, tel: c.tel, email: c.email }); setSuggClient(false); }, style: { display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "transparent", borderBottom: i < clientsFiltres.length - 1 ? `1px solid ${LINE}` : "none" } },
+                            React.createElement("div", { style: { fontSize: 13, color: TEXT } }, c.societe || c.nom),
+                            React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED } }, [c.nom, c.tel].filter(Boolean).join(" · ") || "—"))))),
                     React.createElement("div", null,
                         React.createElement("label", { style: label }, "Nom du contact"),
                         React.createElement("input", { value: client.nom, onChange: (e) => setClient({ ...client, nom: e.target.value }), style: champ, placeholder: "Ex : Marie Dupont" })),
@@ -1426,13 +1459,16 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                         React.createElement("label", { style: label }, "E-mail"),
                         React.createElement("input", { value: client.email, onChange: (e) => setClient({ ...client, email: e.target.value }), style: champ, inputMode: "email", placeholder: "client@exemple.nc" }))),
                 React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED, margin: "10px 0 8px" } }, "Ajouter une ligne"),
-                React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" } },
-                    React.createElement("div", { style: { flex: 1, minWidth: 200 } },
-                        React.createElement("label", { style: label }, "Depuis la carte"),
-                        React.createElement("select", { value: choix, onChange: (e) => setChoix(e.target.value), style: { ...champ, marginBottom: 0, cursor: "pointer", colorScheme: "dark" } },
-                            React.createElement("option", { value: "" }, "Choisir un produit…"),
-                            products.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name + " — " + fmt(p.price))))),
-                    React.createElement("button", { onClick: ajouterProduit, disabled: !choix, style: { padding: "11px 18px", borderRadius: 10, fontSize: 14, fontWeight: 600, background: choix ? ACCENT : LINE, color: choix ? "#fff" : TEXT_MUTED } }, "Ajouter")),
+                React.createElement("div", null,
+                    React.createElement("label", { style: label }, "Depuis la carte"),
+                    React.createElement("input", { value: recherche, onChange: (e) => setRecherche(e.target.value), style: { ...champ, marginBottom: produitsFiltres.length ? 0 : 10 }, placeholder: "Tape les premières lettres : nem, coca, riz…" }),
+                    // Recherche insensible aux accents : « the glace » trouve « Thé Glacé ».
+                    produitsFiltres.length > 0 && React.createElement("div", { style: { marginTop: 4, marginBottom: 10, borderRadius: 8, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } }, produitsFiltres.map((p, i) => React.createElement("button", { key: p.id, onClick: () => ajouterLigne(p), style: { display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "9px 12px", background: "transparent", borderBottom: i < produitsFiltres.length - 1 ? `1px solid ${LINE}` : "none" } },
+                        React.createElement("span", { style: { width: 6, height: 22, borderRadius: 999, flexShrink: 0, background: colorOf(p.category) } }),
+                        React.createElement("span", { style: { flex: 1, fontSize: 13, color: TEXT } }, p.name),
+                        React.createElement("span", { className: "tabnum", style: { fontSize: 12, color: TEXT_MUTED } }, "TGC " + (p.tgc || 0) + " %"),
+                        React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD } }, fmt(p.price))))),
+                    recherche && produitsFiltres.length === 0 && React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 10 } }, "Aucun produit ne correspond.")),
                 React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12 } },
                     React.createElement("div", { style: { flex: 2, minWidth: 160 } },
                         React.createElement("label", { style: label }, "Ligne libre"),

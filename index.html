@@ -422,6 +422,30 @@ async function genererPdfDevis(devis) {
     }
     return doc.output("blob");
 }
+async function apercuDevis(devis, showToast) {
+    let blob;
+    try {
+        blob = await genererPdfDevis(devis);
+    }
+    catch (e) {
+        showToast("⚠️ Aperçu impossible : " + (e.message || "erreur"));
+        return;
+    }
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    // Les navigateurs mobiles bloquent souvent l'ouverture d'onglet : dans ce
+    // cas on retombe sur un téléchargement, qui ouvre la visionneuse système.
+    if (!w) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = devis.numero + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showToast("Aperçu téléchargé");
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 async function envoyerDevis(devis, showToast) {
     let blob;
     try {
@@ -1401,13 +1425,23 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
     }
     function changerQte(id, d) { setLignes((prev) => prev.map((l) => (l.id === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0)); }
     function vider() { setLignes([]); setClient({ societe: "", nom: "", tel: "", email: "" }); setNote(""); }
-    function emettre() {
-        if (lignes.length === 0) {
-            showToast("Ajoute au moins une ligne.");
-            return;
+    // Échap referme les listes de suggestions sans vider le devis en cours.
+    useEffect(() => {
+        function onKey(e) {
+            if (e.key !== "Escape")
+                return;
+            if (recherche) {
+                setRecherche("");
+                return;
+            }
+            if (suggClient)
+                setSuggClient(false);
         }
-        setBusy(true);
-        const devis = {
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [recherche, suggClient]);
+    function construireDevis() {
+        return {
             numero: numeroSuivant(quotes),
             createdAt: new Date().toISOString(),
             dateKey: todayKey(),
@@ -1418,10 +1452,25 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
             validite: Number(validite) || 30,
             note: note,
         };
-        saveQuote(devis)
-            .then(() => envoyerDevis(devis, showToast))
-            .then(() => { showToast("Devis " + devis.numero + " émis"); vider(); })
-            .catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible")))
+    }
+    function apercu() {
+        if (lignes.length === 0)
+            return;
+        apercuDevis(construireDevis(), showToast);
+    }
+    function emettre() {
+        if (lignes.length === 0) {
+            showToast("Ajoute au moins une ligne.");
+            return;
+        }
+        setBusy(true);
+        const devis = construireDevis();
+        // Le PDF part d'abord : un refus d'écriture dans l'historique ne doit
+        // pas priver le client de son devis.
+        envoyerDevis(devis, showToast)
+            .then(() => saveQuote(devis).catch(() => showToast("⚠️ Devis produit, mais non enregistré dans l'historique.")))
+            .then(() => { vider(); })
+            .catch((e) => showToast("⚠️ " + (e.message || "Génération impossible")))
             .then(() => setBusy(false));
     }
     return (React.createElement("div", { style: { padding: 20, maxWidth: 720, margin: "0 auto" } },
@@ -1461,7 +1510,10 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                 React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED, margin: "10px 0 8px" } }, "Ajouter une ligne"),
                 React.createElement("div", null,
                     React.createElement("label", { style: label }, "Depuis la carte"),
-                    React.createElement("input", { value: recherche, onChange: (e) => setRecherche(e.target.value), style: { ...champ, marginBottom: produitsFiltres.length ? 0 : 10 }, placeholder: "Tape les premières lettres : nem, coca, riz…" }),
+                    React.createElement("div", { style: { position: "relative" } },
+                        React.createElement("input", { value: recherche, onChange: (e) => setRecherche(e.target.value), style: { ...champ, marginBottom: produitsFiltres.length ? 0 : 10, paddingRight: 38 }, placeholder: "Tape les premières lettres : nem, coca, riz…" }),
+                        recherche && React.createElement("button", { onClick: () => setRecherche(""), title: "Effacer la recherche (Échap)", style: { position: "absolute", right: 6, top: 6, width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
+                            React.createElement(Icon.X, { size: 14, color: TEXT_MUTED }))),
                     // Recherche insensible aux accents : « the glace » trouve « Thé Glacé ».
                     produitsFiltres.length > 0 && React.createElement("div", { style: { marginTop: 4, marginBottom: 10, borderRadius: 8, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } }, produitsFiltres.map((p, i) => React.createElement("button", { key: p.id, onClick: () => ajouterLigne(p), style: { display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "9px 12px", background: "transparent", borderBottom: i < produitsFiltres.length - 1 ? `1px solid ${LINE}` : "none" } },
                         React.createElement("span", { style: { width: 6, height: 22, borderRadius: 999, flexShrink: 0, background: colorOf(p.category) } }),
@@ -1508,7 +1560,9 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                     React.createElement("div", { style: { flex: 1, minWidth: 220 } },
                         React.createElement("label", { style: label }, "Note (facultative)"),
                         React.createElement("input", { value: note, onChange: (e) => setNote(e.target.value), style: champ, placeholder: "Ex : Livraison incluse sur Nouméa" }))),
-                React.createElement("button", { onClick: emettre, disabled: busy || lignes.length === 0, className: "font-display", style: { width: "100%", marginTop: 8, padding: "15px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, background: busy || lignes.length === 0 ? LINE : ACCENT_GREEN, color: busy || lignes.length === 0 ? TEXT_MUTED : "#fff" } }, busy ? "Génération…" : "Émettre et envoyer le devis"),
+                React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
+                    React.createElement("button", { onClick: () => apercu(), disabled: lignes.length === 0, style: { flex: 1, minWidth: 140, padding: "15px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: lignes.length === 0 ? TEXT_MUTED : TEXT, border: `1px solid ${LINE}` } }, "Aperçu PDF"),
+                    React.createElement("button", { onClick: emettre, disabled: busy || lignes.length === 0, className: "font-display", style: { flex: 2, minWidth: 200, padding: "15px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, background: busy || lignes.length === 0 ? LINE : ACCENT_GREEN, color: busy || lignes.length === 0 ? TEXT_MUTED : "#fff" } }, busy ? "Génération…" : "Émettre et envoyer")),
                 lignes.length > 0 && React.createElement("button", { onClick: vider, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Tout effacer"))));
 }
 /* ---------- Écran de connexion (PIN partagé) ---------- */

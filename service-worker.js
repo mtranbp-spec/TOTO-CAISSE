@@ -1,7 +1,9 @@
-const CACHE_NAME = "toto-caisse-v3";
+const CACHE_NAME = "toto-caisse-v4";
 const ASSETS = [
   "./manifest.json",
   "./icon.jpg",
+  "./logo-devis.jpg",
+  "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
   "https://unpkg.com/react@18/umd/react.production.min.js",
   "https://unpkg.com/react-dom@18/umd/react-dom.production.min.js",
   "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",

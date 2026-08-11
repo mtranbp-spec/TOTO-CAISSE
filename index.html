@@ -46,20 +46,36 @@
     #root { padding-bottom: calc(var(--toto-tabbar) + env(safe-area-inset-bottom)); }
     /* Seule la vue Caisse réserve la hauteur du ticket : Stats et Produits
        n'en affichent pas et n'auraient qu'un vide en bas. */
-    .toto-pos-col { padding-bottom: calc(33vh + 16px) !important; }
+    .toto-pos-col { padding-bottom: calc(42vh + 16px) !important; }
     .toto-ticket {
       position: fixed !important;
       left: 0; right: 0;
       bottom: calc(var(--toto-tabbar) + env(safe-area-inset-bottom));
-      height: 33vh;
+      /* clamp garantit une hauteur utilisable même sur un écran très court,
+         sans devenir envahissant sur un grand téléphone. */
+      height: clamp(240px, 42vh, 400px);
       width: auto !important;
       padding: 8px !important;
       z-index: 35;
     }
     .toto-ticket-card { height: 100%; }
-    /* min-height:0 est indispensable : sans lui un enfant flex refuse de
+    /* En-tête et pied gardent leur taille ; seule la liste absorbe le reste.
+       min-height:0 est indispensable : sans lui un enfant flex refuse de
        rétrécir sous sa hauteur de contenu et le défilement ne s'active pas. */
+    .toto-ticket-head, .toto-ticket-foot { flex-shrink: 0; }
     .toto-ticket-items { flex: 1; min-height: 0; max-height: none !important; }
+    /* Le pied doit rester compact : à pleine taille il ne laissait que
+       quelques pixels aux articles. */
+    .toto-ticket-foot { padding: 8px 12px 10px !important; }
+    .toto-ticket-foot .toto-tgc { margin-bottom: 6px !important; padding-bottom: 6px !important; }
+    .toto-ticket-foot .toto-tgc > div { margin-bottom: 2px !important; font-size: 11px !important; }
+    /* Sur téléphone on ne garde que « Dont TGC » : le détail par taux et le
+       total HT mangeaient trois lignes que la liste d'articles réclame. */
+    .toto-ticket-foot .toto-tgc > div:not(:last-child) { display: none; }
+    .toto-ticket-foot .toto-total { margin-bottom: 6px !important; }
+    .toto-ticket-foot .toto-total > span:last-child { font-size: 19px !important; }
+    .toto-ticket-foot .toto-encaisser { padding: 11px 0 !important; margin-bottom: 4px !important; }
+    .toto-ticket-foot .toto-vider { padding: 4px 0 !important; font-size: 11px !important; }
     .toto-tabs {
       position: fixed !important;
       left: 0; right: 0; bottom: 0;
@@ -77,7 +93,7 @@
       font-size: 13px !important;
     }
     /* Le message de confirmation doit rester au-dessus de la barre. */
-    .toto-toast { bottom: calc(33vh + var(--toto-tabbar) + env(safe-area-inset-bottom) + 16px) !important; }
+    .toto-toast { bottom: calc(42vh + var(--toto-tabbar) + env(safe-area-inset-bottom) + 16px) !important; }
   }
 </style>
 
@@ -85,6 +101,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin onerror="showFatal('Impossible de charger React-DOM depuis unpkg.com — vérifie ta connexion internet ou si un pare-feu bloque unpkg.com.')"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase — vérifie ta connexion internet.')"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase Firestore — vérifie ta connexion internet.')"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" crossorigin onerror="showFatal('Impossible de charger Firebase Auth — vérifie ta connexion internet.')"></script>
 <script>
   var firebaseConfig = {
@@ -232,6 +249,9 @@ const Icon = {
         React.createElement("path", { d: "M12 20V10M18 20V4M6 20v-4", stroke: p.color || "#fff", strokeWidth: "2.2", strokeLinecap: "round" })),
     X: (p) => React.createElement("svg", { width: p.size || 18, height: p.size || 18, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M18 6 6 18M6 6l12 12", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Doc: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
+        React.createElement("path", { d: "M14 2v6h6M8 13h8M8 17h5", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
     Move: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Pencil: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
@@ -240,6 +260,202 @@ const Icon = {
         React.createElement("rect", { x: "4", y: "11", width: "16", height: "10", rx: "2", stroke: p.color || "#fff", strokeWidth: "2" }),
         React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
 };
+/* ---------- Devis : PDF et partage ---------- */
+// Le logo est chargé une fois puis gardé en mémoire : le relire à chaque
+// devis rallongerait inutilement la génération.
+let logoCache = null;
+async function chargerLogo() {
+    if (logoCache)
+        return logoCache;
+    const r = await fetch("logo-devis.jpg");
+    const b = await r.blob();
+    logoCache = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.onerror = rej;
+        fr.readAsDataURL(b);
+    });
+    return logoCache;
+}
+// toLocaleString("fr-FR") separe les milliers par une espace fine insecable
+// (U+202F) que les polices standard du PDF rendent comme une barre oblique :
+// « 45 000 F » devenait « 45/000 F ». On la remplace par une espace normale.
+function fmtPdf(n) { return fmt(n).replace(/[\u202F\u00A0]/g, " "); }
+function numeroSuivant(devisExistants) {
+    const annee = new Date().getFullYear();
+    const prefixe = "DEV-" + annee + "-";
+    const nums = devisExistants
+        .filter((d) => typeof d.numero === "string" && d.numero.indexOf(prefixe) === 0)
+        .map((d) => parseInt(d.numero.slice(prefixe.length), 10))
+        .filter((n) => !isNaN(n));
+    const suivant = (nums.length ? Math.max(...nums) : 0) + 1;
+    return prefixe + String(suivant).padStart(3, "0");
+}
+function ventiler(lignes) {
+    const m = new Map();
+    lignes.forEach((l) => {
+        const taux = l.tgc || 0;
+        const e = m.get(taux) || { taux, ttc: 0 };
+        e.ttc += l.price * l.qty;
+        m.set(taux, e);
+    });
+    return Array.from(m.values())
+        .map((e) => ({ taux: e.taux, ttc: e.ttc, ht: htDepuisTTC(e.ttc, e.taux), tgc: tgcDepuisTTC(e.ttc, e.taux) }))
+        .sort((a, b) => a.taux - b.taux);
+}
+async function genererPdfDevis(devis) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const M = 12, L = 210 - M * 2;
+    let y = M;
+    try {
+        const logo = await chargerLogo();
+        const h = L * 509 / 1200;
+        doc.addImage(logo, "JPEG", M, y, L, h);
+        y += h + 8;
+    }
+    catch (e) {
+        y += 4;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text("DEVIS", M, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(devis.numero, 210 - M, y - 5, { align: "right" });
+    const d = new Date(devis.createdAt);
+    doc.text("Le " + d.toLocaleDateString("fr-FR"), 210 - M, y, { align: "right" });
+    y += 10;
+    doc.setDrawColor(194, 53, 42);
+    doc.setLineWidth(0.8);
+    doc.line(M, y, 210 - M, y);
+    y += 8;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("CLIENT", M, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    y += 5;
+    const c = devis.client || {};
+    [c.societe, c.nom, c.tel, c.email].filter(Boolean).forEach((t) => { doc.text(String(t), M, y); y += 5; });
+    if (![c.societe, c.nom, c.tel, c.email].filter(Boolean).length) { doc.text("—", M, y); y += 5; }
+    y += 5;
+    // En-tête du tableau
+    const cQte = 118, cPu = 142, cTot = 210 - M;
+    doc.setFillColor(34, 29, 26);
+    doc.rect(M, y - 5, L, 8, "F");
+    doc.setTextColor(243, 234, 217);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("DÉSIGNATION", M + 2, y);
+    doc.text("QTÉ", cQte, y, { align: "right" });
+    doc.text("PU TTC", cPu, y, { align: "right" });
+    doc.text("TOTAL TTC", cTot - 2, y, { align: "right" });
+    doc.setTextColor(20, 20, 20);
+    y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    (devis.lignes || []).forEach((l) => {
+        if (y > 250) { doc.addPage(); y = M + 10; }
+        const nom = doc.splitTextToSize(String(l.name), 100);
+        doc.text(nom, M + 2, y);
+        doc.text(String(l.qty), cQte, y, { align: "right" });
+        doc.text(fmtPdf(l.price), cPu, y, { align: "right" });
+        doc.text(fmtPdf(l.price * l.qty), cTot - 2, y, { align: "right" });
+        y += Math.max(6, nom.length * 5);
+        doc.setDrawColor(225, 225, 225);
+        doc.setLineWidth(0.2);
+        doc.line(M, y - 4, 210 - M, y - 4);
+    });
+    y += 4;
+    // Les totaux et la signature ne doivent jamais être coupés : on bascule
+    // sur une nouvelle page si la place manque.
+    if (y > 225) { doc.addPage(); y = M + 10; }
+    const vent = ventiler(devis.lignes || []);
+    const totalTTC = (devis.lignes || []).reduce((s, l) => s + l.price * l.qty, 0);
+    const totalTGC = vent.reduce((s, e) => s + e.tgc, 0);
+    const xLib = 130;
+    doc.setFontSize(10);
+    doc.text("Total HT", xLib, y);
+    doc.text(fmtPdf(totalTTC - totalTGC), cTot - 2, y, { align: "right" });
+    y += 5;
+    vent.filter((e) => e.taux > 0).forEach((e) => {
+        doc.text("TGC " + e.taux + " %", xLib, y);
+        doc.text(fmtPdf(e.tgc), cTot - 2, y, { align: "right" });
+        y += 5;
+    });
+    doc.setFillColor(194, 53, 42);
+    doc.rect(xLib - 4, y - 4, 210 - M - xLib + 4, 9, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text("TOTAL TTC", xLib, y + 2);
+    doc.text(fmtPdf(totalTTC), cTot - 2, y + 2, { align: "right" });
+    doc.setTextColor(20, 20, 20);
+    doc.setFont("helvetica", "normal");
+    y += 18;
+    if (y > 245) { doc.addPage(); y = M + 10; }
+    doc.setFontSize(9);
+    doc.text("Devis valable " + (devis.validite || 30) + " jours à compter de sa date d'émission.", M, y);
+    y += 5;
+    if (devis.note) {
+        doc.splitTextToSize(String(devis.note), L).forEach((t) => { doc.text(t, M, y); y += 4.5; });
+    }
+    y += 8;
+    doc.text("Bon pour accord, le ....... / ....... / ..........", M, y);
+    doc.text("Signature du client :", 120, y);
+    doc.setDrawColor(150, 150, 150);
+    doc.rect(120, y + 3, 78, 24);
+    // Pied de page et pagination sur chaque page
+    const total = doc.getNumberOfPages();
+    for (let i = 1; i <= total; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(120, 120, 120);
+        doc.text("TOTO — Plats à emporter, traiteur — Tél. 45 98 23 — Lundi au vendredi, 9h-14h", 105, 288, { align: "center" });
+        if (total > 1)
+            doc.text(devis.numero + " - page " + i + "/" + total, 210 - 12, 288, { align: "right" });
+    }
+    return doc.output("blob");
+}
+async function envoyerDevis(devis, showToast) {
+    let blob;
+    try {
+        blob = await genererPdfDevis(devis);
+    }
+    catch (e) {
+        showToast("⚠️ PDF impossible : " + (e.message || "erreur"));
+        return;
+    }
+    const nomFichier = devis.numero + ".pdf";
+    const sujet = "Devis " + devis.numero + " - TOTO";
+    const corps = "Bonjour,\n\nVeuillez trouver ci-joint le devis " + devis.numero + " d'un montant de "
+        + fmt((devis.lignes || []).reduce((s, l) => s + l.price * l.qty, 0)) + " TTC.\n\nCordialement,\nTOTO - 45 98 23";
+    const fichier = new File([blob], nomFichier, { type: "application/pdf" });
+    // Partage natif quand le systeme le propose : le PDF part reellement en
+    // piece jointe. Sinon on telecharge et on ouvre le client mail.
+    if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
+        try {
+            await navigator.share({ files: [fichier], title: sujet, text: corps });
+            return;
+        }
+        catch (e) {
+            if (e && e.name === "AbortError")
+                return; // partage annule par l'utilisateur
+        }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nomFichier;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 8000);
+    showToast("PDF téléchargé — joins-le au message");
+    const dest = (devis.client && devis.client.email) ? encodeURIComponent(devis.client.email) : "";
+    window.location.href = "mailto:" + dest + "?subject=" + encodeURIComponent(sujet) + "&body=" + encodeURIComponent(corps);
+}
 /* ---------- Grille réorganisable (glisser-déposer doigt + souris) ----------
    Le drag HTML5 natif ne fonctionne pas au toucher : on passe donc par les
    événements Pointer, qui couvrent souris, doigt et stylet de la même façon.
@@ -403,6 +619,7 @@ function App() {
     const [catDocs, setCatDocs] = useState([]);
     const [catsLoaded, setCatsLoaded] = useState(false);
     const [reorderPos, setReorderPos] = useState(false);
+    const [quotes, setQuotes] = useState([]);
     const toastTimer = useRef(null);
     useEffect(() => {
         const db = getDb();
@@ -426,11 +643,12 @@ function App() {
             setSyncStatus("live");
         }, () => setSyncStatus("error"));
         const unsubSales = db.collection("sales").onSnapshot((snap) => setSales(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setSyncStatus("error"));
+        const unsubQuotes = db.collection("quotes").onSnapshot((snap) => setQuotes(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => { });
         const unsubCats = db.collection("categories").onSnapshot((snap) => {
             setCatDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
             setCatsLoaded(true);
         }, () => setSyncStatus("error"));
-        return () => { unsubProducts(); unsubSales(); unsubCats(); };
+        return () => { unsubProducts(); unsubSales(); unsubCats(); unsubQuotes(); };
     }, []);
     // Amorçage : les catégories n'existaient qu'implicitement dans les produits.
     // Au premier lancement on les matérialise en documents, avec leurs couleurs
@@ -562,6 +780,12 @@ function App() {
         orderedProducts.forEach((p, i) => batch.update(db.collection("products").doc(p.id), { order: i }));
         batch.commit().catch(() => { migrated.current = false; });
     }, [orderedProducts]);
+    function saveQuote(devis) {
+        const db = getDb();
+        if (!db)
+            return Promise.reject(new Error("Pas de connexion."));
+        return db.collection("quotes").doc(devis.numero).set(devis);
+    }
     function reorderProducts(ids) {
         const db = getDb();
         if (!db)
@@ -773,10 +997,11 @@ function App() {
                 React.createElement("div", { className: "toto-tabs", style: { display: "flex", alignItems: "center", borderRadius: 999, padding: 4, background: PANEL } },
                     React.createElement(TabButton, { active: view === "pos", onClick: () => setView("pos") }, "Caisse"),
                     React.createElement(TabButton, { active: view === "stats", onClick: () => setView("stats"), icon: React.createElement(Icon.Bar, { size: 13 }) }, "Stats"),
-                    React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits")),
+                    React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits"),
+                    React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -813,7 +1038,7 @@ function App() {
                     })),
             React.createElement("div", { className: "toto-ticket", style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
                 React.createElement("div", { className: "toto-ticket-card", style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
-                    React.createElement("div", { style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },
+                    React.createElement("div", { className: "toto-ticket-head", style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },
                         React.createElement(Icon.List, { size: 16, color: TEXT_MUTED }),
                         React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT } }, "Ticket"),
                         React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, color: TEXT_MUTED } },
@@ -837,10 +1062,10 @@ function App() {
                             React.createElement(Icon.Plus, { size: 13, color: "#fff" })),
                         React.createElement("button", { onClick: () => removeFromCart(it.id), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", marginLeft: 4 } },
                             React.createElement(Icon.Trash, { size: 13, color: TEXT_MUTED })))))),
-                    React.createElement("div", { style: { padding: "12px 16px 16px", borderTop: `1px dashed ${LINE}` } },
+                    React.createElement("div", { className: "toto-ticket-foot", style: { padding: "12px 16px 16px", borderTop: `1px dashed ${LINE}` } },
                         // Le détail TGC n'apparaît que s'il y a de la taxe :
                         // tant que les taux sont à 0, le ticket reste inchangé.
-                        totalTGC > 0 && React.createElement("div", { style: { marginBottom: 10, paddingBottom: 10, borderBottom: `1px dashed ${LINE}` } },
+                        totalTGC > 0 && React.createElement("div", { className: "toto-tgc", style: { marginBottom: 10, paddingBottom: 10, borderBottom: `1px dashed ${LINE}` } },
                             React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
                                 React.createElement("span", null, "Total HT"),
                                 React.createElement("span", { className: "tabnum" }, fmt(cartTotal - totalTGC))),
@@ -850,11 +1075,11 @@ function App() {
                             React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: TEXT } },
                                 React.createElement("span", null, "Dont TGC"),
                                 React.createElement("span", { className: "tabnum" }, fmt(totalTGC)))),
-                        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 } },
+                        React.createElement("div", { className: "toto-total", style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 } },
                             React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL TTC"),
                             React.createElement("span", { className: "tabnum font-display", style: { fontSize: 24, color: GOLD } }, fmt(cartTotal))),
-                        React.createElement("button", { onClick: checkout, disabled: cart.length === 0, className: "font-display", style: { width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, marginBottom: 8, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff", opacity: cart.length === 0 ? 0.6 : 1 } }, "Encaisser"),
-                        cart.length > 0 && React.createElement("button", { onClick: clearCart, style: { width: "100%", padding: "8px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider le ticket")))))),
+                        React.createElement("button", { onClick: checkout, disabled: cart.length === 0, className: "font-display toto-encaisser", style: { width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, marginBottom: 8, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff", opacity: cart.length === 0 ? 0.6 : 1 } }, "Encaisser"),
+                        cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { width: "100%", padding: "8px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider le ticket")))))),
         toast && (React.createElement("div", { className: "toto-toast", style: { position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 24, padding: "10px 16px", borderRadius: 999, fontSize: 14, fontWeight: 500, background: INK, color: "#fff", border: `1px solid ${LINE}`, zIndex: 50 } }, toast))));
 }
 function TabButton({ active, onClick, children, icon }) {
@@ -1107,6 +1332,148 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
                         catError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 12 } }, catError),
                         React.createElement("button", { onClick: submitCatForm, disabled: catBusy || !catForm.name.trim(), className: "font-display", style: { width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: catBusy || !catForm.name.trim() ? LINE : ACCENT_GREEN, color: catBusy || !catForm.name.trim() ? TEXT_MUTED : "#fff" } }, catBusy ? "Enregistrement…" : "Enregistrer"),
                         catForm.id && React.createElement("button", { onClick: askDelete, disabled: catBusy, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer cette catégorie")))))));
+}
+/* ---------- Vue Devis ---------- */
+function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
+    const [onglet, setOnglet] = useState("nouveau");
+    const [client, setClient] = useState({ societe: "", nom: "", tel: "", email: "" });
+    const [lignes, setLignes] = useState([]);
+    const [validite, setValidite] = useState(30);
+    const [note, setNote] = useState("");
+    const [choix, setChoix] = useState("");
+    const [libre, setLibre] = useState({ name: "", price: "", tgc: 6 });
+    const [busy, setBusy] = useState(false);
+    const totalTTC = useMemo(() => lignes.reduce((s, l) => s + l.price * l.qty, 0), [lignes]);
+    const vent = useMemo(() => ventiler(lignes), [lignes]);
+    const totalTGC = useMemo(() => vent.reduce((s, e) => s + e.tgc, 0), [vent]);
+    const champ = { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
+    const label = { fontSize: 12, color: TEXT_MUTED };
+    function ajouterProduit() {
+        const p = products.find((x) => x.id === choix);
+        if (!p)
+            return;
+        setLignes((prev) => {
+            const i = prev.findIndex((l) => l.id === p.id);
+            if (i !== -1) {
+                const n = prev.slice();
+                n[i] = { ...n[i], qty: n[i].qty + 1 };
+                return n;
+            }
+            return [...prev, { id: p.id, name: p.name, price: p.price, tgc: p.tgc || 0, qty: 1 }];
+        });
+    }
+    function ajouterLibre() {
+        const pv = parseFloat(String(libre.price).replace(",", "."));
+        if (!libre.name.trim() || isNaN(pv) || pv < 0) {
+            showToast("Vérifie le libellé et le prix de la ligne libre.");
+            return;
+        }
+        setLignes((prev) => [...prev, { id: "libre" + Date.now(), name: libre.name.trim(), price: pv, tgc: Number(libre.tgc) || 0, qty: 1 }]);
+        setLibre({ name: "", price: "", tgc: 6 });
+    }
+    function changerQte(id, d) { setLignes((prev) => prev.map((l) => (l.id === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0)); }
+    function vider() { setLignes([]); setClient({ societe: "", nom: "", tel: "", email: "" }); setNote(""); }
+    function emettre() {
+        if (lignes.length === 0) {
+            showToast("Ajoute au moins une ligne.");
+            return;
+        }
+        setBusy(true);
+        const devis = {
+            numero: numeroSuivant(quotes),
+            createdAt: new Date().toISOString(),
+            dateKey: todayKey(),
+            client: client,
+            lignes: lignes.map((l) => ({ name: l.name, price: l.price, qty: l.qty, tgc: l.tgc || 0 })),
+            totalTTC: totalTTC,
+            totalTGC: totalTGC,
+            validite: Number(validite) || 30,
+            note: note,
+        };
+        saveQuote(devis)
+            .then(() => envoyerDevis(devis, showToast))
+            .then(() => { showToast("Devis " + devis.numero + " émis"); vider(); })
+            .catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible")))
+            .then(() => setBusy(false));
+    }
+    return (React.createElement("div", { style: { padding: 20, maxWidth: 720, margin: "0 auto" } },
+        React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 20 } },
+            React.createElement(CategoryTab, { label: "Nouveau devis", active: onglet === "nouveau", color: ACCENT, onClick: () => setOnglet("nouveau") }),
+            React.createElement(CategoryTab, { label: "Historique (" + quotes.length + ")", active: onglet === "histo", color: GOLD, onClick: () => setOnglet("histo") })),
+        onglet === "histo"
+            ? React.createElement("div", null, quotes.length === 0
+                ? React.createElement("div", { style: { fontSize: 13, color: TEXT_MUTED, textAlign: "center", padding: "40px 0" } }, "Aucun devis émis pour l'instant.")
+                : quotes.slice().sort((a, b) => String(b.numero).localeCompare(String(a.numero))).map((d) => React.createElement("div", { key: d.id, style: { display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", marginBottom: 8, borderRadius: 12, background: PANEL, border: `1px solid ${LINE}` } },
+                    React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                        React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT } }, d.numero),
+                        React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                            [(d.client && (d.client.societe || d.client.nom)) || "Sans client", new Date(d.createdAt).toLocaleDateString("fr-FR")].join(" · "))),
+                    React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(d.totalTTC || 0)),
+                    React.createElement("button", { onClick: () => envoyerDevis(d, showToast), title: "Régénérer le PDF", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: LINE, color: TEXT } }, "PDF"))))
+            : React.createElement("div", null,
+                React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED, marginBottom: 8 } }, "Client"),
+                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 } },
+                    React.createElement("div", null,
+                        React.createElement("label", { style: label }, "Société"),
+                        React.createElement("input", { value: client.societe, onChange: (e) => setClient({ ...client, societe: e.target.value }), style: champ, placeholder: "Ex : Mairie de Nouméa" })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: label }, "Nom du contact"),
+                        React.createElement("input", { value: client.nom, onChange: (e) => setClient({ ...client, nom: e.target.value }), style: champ, placeholder: "Ex : Marie Dupont" })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: label }, "Téléphone"),
+                        React.createElement("input", { value: client.tel, onChange: (e) => setClient({ ...client, tel: e.target.value }), style: champ, inputMode: "tel", placeholder: "Ex : 75 12 34" })),
+                    React.createElement("div", null,
+                        React.createElement("label", { style: label }, "E-mail"),
+                        React.createElement("input", { value: client.email, onChange: (e) => setClient({ ...client, email: e.target.value }), style: champ, inputMode: "email", placeholder: "client@exemple.nc" }))),
+                React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED, margin: "10px 0 8px" } }, "Ajouter une ligne"),
+                React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" } },
+                    React.createElement("div", { style: { flex: 1, minWidth: 200 } },
+                        React.createElement("label", { style: label }, "Depuis la carte"),
+                        React.createElement("select", { value: choix, onChange: (e) => setChoix(e.target.value), style: { ...champ, marginBottom: 0, cursor: "pointer", colorScheme: "dark" } },
+                            React.createElement("option", { value: "" }, "Choisir un produit…"),
+                            products.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name + " — " + fmt(p.price))))),
+                    React.createElement("button", { onClick: ajouterProduit, disabled: !choix, style: { padding: "11px 18px", borderRadius: 10, fontSize: 14, fontWeight: 600, background: choix ? ACCENT : LINE, color: choix ? "#fff" : TEXT_MUTED } }, "Ajouter")),
+                React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 12 } },
+                    React.createElement("div", { style: { flex: 2, minWidth: 160 } },
+                        React.createElement("label", { style: label }, "Ligne libre"),
+                        React.createElement("input", { value: libre.name, onChange: (e) => setLibre({ ...libre, name: e.target.value }), style: { ...champ, marginBottom: 0 }, placeholder: "Ex : Buffet 40 personnes" })),
+                    React.createElement("div", { style: { width: 110 } },
+                        React.createElement("label", { style: label }, "Prix TTC"),
+                        React.createElement("input", { value: libre.price, onChange: (e) => setLibre({ ...libre, price: e.target.value }), style: { ...champ, marginBottom: 0 }, inputMode: "numeric", placeholder: "0" })),
+                    React.createElement("div", { style: { width: 92 } },
+                        React.createElement("label", { style: label }, "TGC"),
+                        React.createElement("select", { value: libre.tgc, onChange: (e) => setLibre({ ...libre, tgc: Number(e.target.value) }), style: { ...champ, marginBottom: 0, cursor: "pointer", colorScheme: "dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %")))),
+                    React.createElement("button", { onClick: ajouterLibre, style: { padding: "11px 18px", borderRadius: 10, fontSize: 14, fontWeight: 600, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }, "Ajouter")),
+                React.createElement("div", { style: { marginTop: 20, borderRadius: 14, background: PANEL, border: `1px solid ${LINE}`, overflow: "hidden" } },
+                    lignes.length === 0
+                        ? React.createElement("div", { style: { fontSize: 13, color: TEXT_MUTED, textAlign: "center", padding: "32px 0" } }, "Aucune ligne. Ajoute des produits ou une ligne libre.")
+                        : lignes.map((l) => React.createElement("div", { key: l.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: `1px solid ${LINE}` } },
+                            React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                                React.createElement("div", { style: { fontSize: 14, color: TEXT } }, l.name),
+                                React.createElement("div", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED } }, fmt(l.price) + " · TGC " + (l.tgc || 0) + " %")),
+                            React.createElement("button", { onClick: () => changerQte(l.id, -1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } }, React.createElement(Icon.Minus, { size: 13, color: TEXT })),
+                            React.createElement("span", { className: "tabnum", style: { width: 22, textAlign: "center", fontSize: 14, color: TEXT } }, l.qty),
+                            React.createElement("button", { onClick: () => changerQte(l.id, 1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: ACCENT } }, React.createElement(Icon.Plus, { size: 13, color: "#fff" })),
+                            React.createElement("span", { className: "tabnum", style: { width: 78, textAlign: "right", fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(l.price * l.qty)))),
+                    lignes.length > 0 && React.createElement("div", { style: { padding: "12px 14px" } },
+                        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
+                            React.createElement("span", null, "Total HT"),
+                            React.createElement("span", { className: "tabnum" }, fmt(totalTTC - totalTGC))),
+                        vent.filter((e) => e.taux > 0).map((e) => React.createElement("div", { key: e.taux, style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
+                            React.createElement("span", null, "TGC " + e.taux + " %"),
+                            React.createElement("span", { className: "tabnum" }, fmt(e.tgc)))),
+                        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 } },
+                            React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL TTC"),
+                            React.createElement("span", { className: "tabnum font-display", style: { fontSize: 22, color: GOLD } }, fmt(totalTTC))))),
+                React.createElement("div", { style: { display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" } },
+                    React.createElement("div", { style: { width: 150 } },
+                        React.createElement("label", { style: label }, "Validité (jours)"),
+                        React.createElement("input", { value: validite, onChange: (e) => setValidite(e.target.value), style: champ, inputMode: "numeric" })),
+                    React.createElement("div", { style: { flex: 1, minWidth: 220 } },
+                        React.createElement("label", { style: label }, "Note (facultative)"),
+                        React.createElement("input", { value: note, onChange: (e) => setNote(e.target.value), style: champ, placeholder: "Ex : Livraison incluse sur Nouméa" }))),
+                React.createElement("button", { onClick: emettre, disabled: busy || lignes.length === 0, className: "font-display", style: { width: "100%", marginTop: 8, padding: "15px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, background: busy || lignes.length === 0 ? LINE : ACCENT_GREEN, color: busy || lignes.length === 0 ? TEXT_MUTED : "#fff" } }, busy ? "Génération…" : "Émettre et envoyer le devis"),
+                lignes.length > 0 && React.createElement("button", { onClick: vider, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Tout effacer"))));
 }
 /* ---------- Écran de connexion (PIN partagé) ---------- */
 function LoginView() {

@@ -903,6 +903,12 @@ function App() {
         orderedProducts.forEach((p, i) => batch.update(db.collection("products").doc(p.id), { order: i }));
         batch.commit().catch(() => { migrated.current = false; });
     }, [orderedProducts]);
+    function deleteQuote(id) {
+        const db = getDb();
+        if (!db)
+            return Promise.reject(new Error("Pas de connexion."));
+        return db.collection("quotes").doc(id).delete();
+    }
     function saveQuote(devis) {
         const db = getDb();
         if (!db)
@@ -1124,7 +1130,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -1457,13 +1463,14 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
                         catForm.id && React.createElement("button", { onClick: askDelete, disabled: catBusy, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer cette catégorie")))))));
 }
 /* ---------- Vue Devis ---------- */
-function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
+function DevisView({ products, colorOf, showToast, quotes, saveQuote, deleteQuote }) {
     const [onglet, setOnglet] = useState("nouveau");
     const [client, setClient] = useState({ societe: "", nom: "", tel: "", email: "" });
     const [lignes, setLignes] = useState([]);
     const [validite, setValidite] = useState(30);
     const [note, setNote] = useState("");
     const [objet, setObjet] = useState("");
+    const [aSupprimer, setASupprimer] = useState(null);
     const [libre, setLibre] = useState({ name: "", price: "", tgc: 6 });
     const [recherche, setRecherche] = useState("");
     const [suggClient, setSuggClient] = useState(false);
@@ -1583,13 +1590,22 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                         React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
                             [(d.client && (d.client.societe || d.client.nom)) || "Sans client", new Date(d.createdAt).toLocaleDateString("fr-FR")].join(" · "))),
                     React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(d.totalTTC || 0)),
-                    React.createElement("button", { onClick: () => envoyerDevis(d, showToast), title: "Régénérer le PDF", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: LINE, color: TEXT } }, "PDF"))))
+                    React.createElement("button", { onClick: () => apercuDevis(d, showToast), title: "Voir le PDF", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: LINE, color: TEXT } }, "Voir"),
+                    React.createElement("button", { onClick: () => envoyerDevis(d, showToast), title: "Renvoyer au client", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer"),
+                    React.createElement("button", { onClick: () => setASupprimer(d), title: "Supprimer ce devis", style: { width: 32, height: 32, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: `1px solid ${LINE}` } },
+                        React.createElement(Icon.Trash, { size: 14, color: "#E86A5C" })))))
             : React.createElement("div", null,
                 React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED, marginBottom: 8 } }, "Client"),
                 React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 } },
                     React.createElement("div", null,
                         React.createElement("label", { style: label }, "Société"),
-                        React.createElement("input", { value: client.societe, onFocus: () => setSuggClient(true), onChange: (e) => { setSuggClient(true); setClient({ ...client, societe: e.target.value }); }, style: { ...champ, marginBottom: clientsFiltres.length ? 0 : 10 }, placeholder: "Ex : Mairie de Nouméa" }),
+                        React.createElement("div", { style: { position: "relative" } },
+                            React.createElement("input", { value: client.societe, onFocus: () => setSuggClient(true), onChange: (e) => { setSuggClient(true); setClient({ ...client, societe: e.target.value }); }, style: { ...champ, marginBottom: clientsFiltres.length ? 0 : 10, paddingRight: 38 }, placeholder: "Ex : Mairie de Nouméa" }),
+                            suggClient && clientsConnus.length > 0 && React.createElement("button", { onClick: () => setSuggClient(false), title: "Fermer la liste (Échap)", style: { position: "absolute", right: 6, top: 6, width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
+                                React.createElement(Icon.X, { size: 14, color: TEXT_MUTED }))),
+                        // Le carnet se construit à partir des devis déjà émis : tant
+                        // qu'aucun n'existe, il n'y a rien à proposer.
+                        suggClient && clientsConnus.length === 0 && React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: -6, marginBottom: 10 } }, "Aucune société enregistrée pour l'instant — elles apparaîtront après ton premier devis."),
                         // Suggestions issues des devis passés : choisir une société
                         // remplit d'un coup contact, téléphone et e-mail.
                         clientsFiltres.length > 0 && React.createElement("div", { style: { marginTop: 4, marginBottom: 10, borderRadius: 8, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } }, clientsFiltres.map((c, i) => React.createElement("button", { key: i, onClick: () => { setClient({ societe: c.societe, nom: c.nom, tel: c.tel, email: c.email }); setSuggClient(false); }, style: { display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "transparent", borderBottom: i < clientsFiltres.length - 1 ? `1px solid ${LINE}` : "none" } },
@@ -1663,7 +1679,18 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                 React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" } },
                     React.createElement("button", { onClick: () => apercu(), disabled: lignes.length === 0, style: { flex: 1, minWidth: 140, padding: "15px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: lignes.length === 0 ? TEXT_MUTED : TEXT, border: `1px solid ${LINE}` } }, "Aperçu PDF"),
                     React.createElement("button", { onClick: emettre, disabled: busy || lignes.length === 0, className: "font-display", style: { flex: 2, minWidth: 200, padding: "15px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, background: busy || lignes.length === 0 ? LINE : ACCENT_GREEN, color: busy || lignes.length === 0 ? TEXT_MUTED : "#fff" } }, busy ? "Génération…" : "Émettre et envoyer")),
-                lignes.length > 0 && React.createElement("button", { onClick: vider, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Tout effacer"))));
+                lignes.length > 0 && React.createElement("button", { onClick: vider, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Tout effacer")),
+        aSupprimer && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 10 } }, "Supprimer ce devis ?"),
+                React.createElement("div", { style: { fontSize: 13, color: TEXT, marginBottom: 4 } }, aSupprimer.numero),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } },
+                    [(aSupprimer.client && (aSupprimer.client.societe || aSupprimer.client.nom)) || "Sans client",
+                        new Date(aSupprimer.createdAt).toLocaleDateString("fr-FR"),
+                        fmt(aSupprimer.totalTTC || 0)].join(" · ")),
+                React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginBottom: 16 } }, "Cette suppression est définitive : le devis ne pourra pas être récupéré."),
+                React.createElement("button", { onClick: () => { const d = aSupprimer; setASupprimer(null); deleteQuote(d.id).then(() => showToast("Devis " + d.numero + " supprimé")).catch((e) => showToast("⚠️ " + (e.message || "Suppression impossible"))); }, className: "font-display", style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "#C2352A", color: "#fff" } }, "Supprimer définitivement"),
+                React.createElement("button", { onClick: () => setASupprimer(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler")))));
 }
 /* ---------- Écran de connexion (PIN partagé) ---------- */
 function LoginView() {

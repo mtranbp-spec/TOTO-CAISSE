@@ -40,7 +40,21 @@
   /* Sur téléphone, la navigation passe en barre basse : c'est là que le pouce
      tombe naturellement. Les !important sont nécessaires pour l'emporter sur
      les styles en ligne des composants. */
+  /* Repère du geste « tirer pour rafraîchir ». Masqué hors téléphone. */
+  .toto-ptr { display: none; }
+  @keyframes toto-spin { to { transform: rotate(360deg); } }
+
   @media (max-width: 640px) {
+    .toto-ptr {
+      display: flex; align-items: center; justify-content: center;
+      position: fixed; top: 8px; left: 50%;
+      width: 38px; height: 38px; border-radius: 999px;
+      background: #221D1A; border: 1px solid #3A322C;
+      z-index: 45; pointer-events: none;
+      transform: translate(-50%, 0);
+    }
+    .toto-ptr svg { transition: transform 60ms linear; }
+    .toto-ptr-actif svg { animation: toto-spin 0.7s linear infinite; }
     /* Empilement par le bas : onglets, puis ticket au-dessus. Le contenu
        réserve la hauteur des deux pour ne jamais passer dessous. */
     #root { padding-bottom: calc(var(--toto-tabbar) + env(safe-area-inset-bottom)); }
@@ -727,6 +741,102 @@ function ReorderGrid({ items, active, gridStyle, renderItem, onReorder }) {
         // conflit avec le déplacement et le FLIP.
         React.createElement("div", { className: active && dragId !== it.id ? "toto-wiggle" : undefined }, renderItem(it, active)))));
 }
+/* ---------- Tirer pour rafraîchir (téléphone) ----------
+   L'appli installée sur l'écran d'accueil n'a pas de barre d'adresse : sans ce
+   geste, aucun moyen de recharger. On manipule le repère directement dans le
+   DOM plutôt que par l'état React, pour que le suivi du doigt reste fluide. */
+function TirerPourRafraichir() {
+    const repere = useRef(null);
+    useEffect(() => {
+        if (!window.matchMedia("(max-width: 640px)").matches)
+            return;
+        const SEUIL = 72, MAX = 110;
+        let depart = null, distance = 0, relache = false;
+        function enHaut() {
+            const el = document.scrollingElement || document.documentElement;
+            return (window.scrollY || el.scrollTop || 0) <= 0;
+        }
+        // On ignore le geste s'il part d'une zone qui a sa propre logique
+        // tactile : réorganisation, ticket défilant, champs de saisie.
+        function zoneReservee(t) {
+            return !!(t && t.closest && t.closest(".toto-drag, .toto-ticket, .toto-tabs, input, textarea, select, button"));
+        }
+        function peindre(d) {
+            const el = repere.current;
+            if (!el)
+                return;
+            const p = Math.min(1, d / SEUIL);
+            el.style.transform = "translate(-50%, " + Math.min(d * 0.5, MAX * 0.5) + "px)";
+            el.style.opacity = String(Math.min(1, d / 30));
+            el.querySelector("svg").style.transform = "rotate(" + p * 270 + "deg)";
+            el.style.borderColor = p >= 1 ? ACCENT_GREEN : LINE;
+        }
+        function onStart(e) {
+            if (relache || e.touches.length !== 1 || !enHaut() || zoneReservee(e.target)) {
+                depart = null;
+                return;
+            }
+            depart = e.touches[0].clientY;
+            distance = 0;
+        }
+        function onMove(e) {
+            if (depart === null)
+                return;
+            const d = e.touches[0].clientY - depart;
+            if (d <= 0) {
+                distance = 0;
+                peindre(0);
+                return;
+            }
+            if (!enHaut()) {
+                depart = null;
+                peindre(0);
+                return;
+            }
+            distance = Math.min(d, MAX);
+            // Sans cela le navigateur déclenche son propre rebond élastique.
+            if (e.cancelable)
+                e.preventDefault();
+            peindre(distance);
+        }
+        function onEnd() {
+            if (depart === null)
+                return;
+            const declenche = distance >= SEUIL;
+            depart = null;
+            if (declenche) {
+                relache = true;
+                peindre(SEUIL);
+                const el = repere.current;
+                if (el)
+                    el.classList.add("toto-ptr-actif");
+                setTimeout(() => window.location.reload(), 220);
+                return;
+            }
+            distance = 0;
+            const el = repere.current;
+            if (el) {
+                el.style.transition = "transform 200ms ease, opacity 200ms ease";
+                peindre(0);
+                setTimeout(() => { if (el) el.style.transition = ""; }, 220);
+            }
+        }
+        window.addEventListener("touchstart", onStart, { passive: true });
+        window.addEventListener("touchmove", onMove, { passive: false });
+        window.addEventListener("touchend", onEnd, { passive: true });
+        window.addEventListener("touchcancel", onEnd, { passive: true });
+        return () => {
+            window.removeEventListener("touchstart", onStart);
+            window.removeEventListener("touchmove", onMove);
+            window.removeEventListener("touchend", onEnd);
+            window.removeEventListener("touchcancel", onEnd);
+        };
+    }, []);
+    return React.createElement("div", { ref: repere, className: "toto-ptr", style: { opacity: 0 } },
+        React.createElement("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none" },
+            React.createElement("path", { d: "M21 12a9 9 0 1 1-3.5-7.1", stroke: TEXT, strokeWidth: "2.2", strokeLinecap: "round" }),
+            React.createElement("path", { d: "M21 3v6h-6", stroke: TEXT, strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" })));
+}
 /* ---------- App ---------- */
 function App() {
     const [products, setProducts] = useState(DEFAULT_PRODUCTS);
@@ -1106,6 +1216,7 @@ function App() {
         showToast("Produit supprimé");
     }
     return (React.createElement("div", { style: { background: BG, minHeight: "100vh" } },
+        React.createElement(TirerPourRafraichir, null),
         React.createElement("div", { className: "flex items-center justify-between", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
                 React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 512 512", fill: "none" },

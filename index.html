@@ -287,13 +287,13 @@ function normaliser(t) {
 function fmtPdf(n) { return fmt(n).replace(/[\u202F\u00A0]/g, " "); }
 function numeroSuivant(devisExistants) {
     const annee = new Date().getFullYear();
-    const prefixe = "DEV-" + annee + "-";
+    const prefixe = "D" + annee + "-";
     const nums = devisExistants
         .filter((d) => typeof d.numero === "string" && d.numero.indexOf(prefixe) === 0)
         .map((d) => parseInt(d.numero.slice(prefixe.length), 10))
         .filter((n) => !isNaN(n));
     const suivant = (nums.length ? Math.max(...nums) : 0) + 1;
-    return prefixe + String(suivant).padStart(3, "0");
+    return prefixe + suivant;
 }
 function ventiler(lignes) {
     const m = new Map();
@@ -307,118 +307,213 @@ function ventiler(lignes) {
         .map((e) => ({ taux: e.taux, ttc: e.ttc, ht: htDepuisTTC(e.ttc, e.taux), tgc: tgcDepuisTTC(e.ttc, e.taux) }))
         .sort((a, b) => a.taux - b.taux);
 }
+// Coordonnées de l'entreprise, reprises telles quelles sur chaque devis.
+const SOCIETE = {
+    nom: "TOTO",
+    adresse: "1 rue Galliéni Centre-Ville – 98800 Nouméa",
+    tel: "Tél : 45 98 23",
+    mail: "Mail : magasin.toto@gmail.com",
+    ridet: "Ridet : 0 612 259.001",
+};
+const BANQUE = [
+    "Banque : Banque Calédonienne d'Investissement (BCI)",
+    "RIB : 17499 00012 17103202012 66",
+];
 async function genererPdfDevis(devis) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const M = 12, L = 210 - M * 2;
-    let y = M;
+    const M = 12, DROITE = 210 - M, L = 210 - M * 2;
+    let y = M + 4;
+    // --- En-tête : bandeau à gauche, identité de l'entreprise à droite ---
+    const largeurLogo = 92, hautLogo = largeurLogo * 509 / 1200;
     try {
         const logo = await chargerLogo();
-        const h = L * 509 / 1200;
-        doc.addImage(logo, "JPEG", M, y, L, h);
-        y += h + 8;
+        doc.addImage(logo, "JPEG", M, y, largeurLogo, hautLogo);
     }
-    catch (e) {
-        y += 4;
-    }
+    catch (e) { }
+    let yd = y + 6;
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    doc.text("DEVIS", M, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(devis.numero, 210 - M, y - 5, { align: "right" });
-    const d = new Date(devis.createdAt);
-    doc.text("Le " + d.toLocaleDateString("fr-FR"), 210 - M, y, { align: "right" });
-    y += 10;
-    doc.setDrawColor(194, 53, 42);
-    doc.setLineWidth(0.8);
-    doc.line(M, y, 210 - M, y);
-    y += 8;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("CLIENT", M, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    y += 5;
-    const c = devis.client || {};
-    [c.societe, c.nom, c.tel, c.email].filter(Boolean).forEach((t) => { doc.text(String(t), M, y); y += 5; });
-    if (![c.societe, c.nom, c.tel, c.email].filter(Boolean).length) { doc.text("—", M, y); y += 5; }
-    y += 5;
-    // En-tête du tableau
-    const cQte = 118, cPu = 142, cTot = 210 - M;
-    doc.setFillColor(34, 29, 26);
-    doc.rect(M, y - 5, L, 8, "F");
-    doc.setTextColor(243, 234, 217);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("DÉSIGNATION", M + 2, y);
-    doc.text("QTÉ", cQte, y, { align: "right" });
-    doc.text("PU TTC", cPu, y, { align: "right" });
-    doc.text("TOTAL TTC", cTot - 2, y, { align: "right" });
+    doc.setFontSize(24);
+    doc.setTextColor(214, 31, 26);
+    doc.text("DEVIS", DROITE, yd, { align: "right" });
+    yd += 8;
     doc.setTextColor(20, 20, 20);
-    y += 8;
+    doc.setFontSize(12);
+    doc.text(SOCIETE.nom, DROITE, yd, { align: "right" });
+    yd += 5;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+    doc.setFontSize(9);
+    [SOCIETE.adresse, SOCIETE.tel, SOCIETE.mail, SOCIETE.ridet].forEach((t) => {
+        doc.text(t, DROITE, yd, { align: "right" });
+        yd += 4.5;
+    });
+    y = Math.max(y + hautLogo, yd) + 5;
+    doc.setDrawColor(214, 31, 26);
+    doc.setLineWidth(0.9);
+    doc.line(M, y, DROITE, y);
+    y += 7;
+    // --- Encadrés client et devis ---
+    // 30 mm : societe + contact + telephone + e-mail tiennent sans troncature.
+    const hBloc = 30, milieu = M + 88;
+    doc.setFillColor(245, 243, 240);
+    doc.rect(M, y, 88, hBloc, "F");
+    doc.setDrawColor(220, 218, 214);
+    doc.setLineWidth(0.3);
+    doc.rect(milieu, y, DROITE - milieu, hBloc);
+    const c = devis.client || {};
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(214, 31, 26);
+    doc.text("CLIENT", M + 4, y + 6);
+    doc.setTextColor(20, 20, 20);
+    doc.setFontSize(11);
+    let yc = y + 12;
+    if (c.societe) {
+        doc.text(String(c.societe).toUpperCase(), M + 4, yc);
+        yc += 5;
+    }
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    [c.nom, c.tel, c.email].filter(Boolean).forEach((t) => {
+        if (yc < y + hBloc - 1) {
+            doc.text(String(t), M + 4, yc);
+            yc += 4.2;
+        }
+    });
+    if (!c.societe && !c.nom)
+        doc.text("—", M + 4, y + 12);
+    let yr = y + 6;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Devis n° : ", milieu + 4, yr);
+    doc.setFont("helvetica", "normal");
+    doc.text(String(devis.numero), milieu + 22, yr);
+    yr += 5;
+    doc.setFont("helvetica", "bold");
+    doc.text("Date du devis : ", milieu + 4, yr);
+    doc.setFont("helvetica", "normal");
+    doc.text(new Date(devis.createdAt).toLocaleDateString("fr-FR"), milieu + 30, yr);
+    yr += 5;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8.5);
+    doc.text("Devis valable " + (devis.validite || 30) + " jours à compter de sa date d'émission.", milieu + 4, yr);
+    yr += 4;
+    doc.text("Passé ce délai, les tarifs et disponibilités pourront être révisés.", milieu + 4, yr);
+    doc.setFont("helvetica", "normal");
+    y += hBloc + 7;
+    // --- Objet ---
+    if (devis.objet) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9.5);
+        doc.setTextColor(214, 31, 26);
+        doc.text("Objet : ", M, y);
+        doc.setTextColor(20, 20, 20);
+        doc.text(String(devis.objet), M + 14, y);
+        doc.setFont("helvetica", "normal");
+        y += 8;
+    }
+    // --- Tableau des lignes ---
+    const xQte = 103, xPuHt = 128, xTgc = 146, xPuTtc = 172, xTot = DROITE - 2;
+    function enTeteTableau() {
+        doc.setFillColor(34, 29, 26);
+        doc.rect(M, y - 5, L, 8, "F");
+        doc.setTextColor(243, 234, 217);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("DÉSIGNATION", M + 2, y);
+        doc.text("QTÉ", xQte, y, { align: "right" });
+        doc.text("PU HT", xPuHt, y, { align: "right" });
+        doc.text("TGC", xTgc, y, { align: "right" });
+        doc.text("PU TTC", xPuTtc, y, { align: "right" });
+        doc.text("TOTAL TTC", xTot, y, { align: "right" });
+        doc.setTextColor(20, 20, 20);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        y += 8;
+    }
+    enTeteTableau();
     (devis.lignes || []).forEach((l) => {
-        if (y > 250) { doc.addPage(); y = M + 10; }
-        const nom = doc.splitTextToSize(String(l.name), 100);
+        if (y > 250) {
+            doc.addPage();
+            y = M + 12;
+            enTeteTableau();
+        }
+        const nom = doc.splitTextToSize(String(l.name), 86);
         doc.text(nom, M + 2, y);
-        doc.text(String(l.qty), cQte, y, { align: "right" });
-        doc.text(fmtPdf(l.price), cPu, y, { align: "right" });
-        doc.text(fmtPdf(l.price * l.qty), cTot - 2, y, { align: "right" });
-        y += Math.max(6, nom.length * 5);
-        doc.setDrawColor(225, 225, 225);
+        doc.text(String(l.qty), xQte, y, { align: "right" });
+        doc.text(fmtPdf(htDepuisTTC(l.price, l.tgc)), xPuHt, y, { align: "right" });
+        doc.text((l.tgc || 0) + " %", xTgc, y, { align: "right" });
+        doc.text(fmtPdf(l.price), xPuTtc, y, { align: "right" });
+        doc.text(fmtPdf(l.price * l.qty), xTot, y, { align: "right" });
+        y += Math.max(6, nom.length * 4.6);
+        doc.setDrawColor(228, 226, 222);
         doc.setLineWidth(0.2);
-        doc.line(M, y - 4, 210 - M, y - 4);
+        doc.line(M, y - 4, DROITE, y - 4);
     });
     y += 4;
-    // Les totaux et la signature ne doivent jamais être coupés : on bascule
-    // sur une nouvelle page si la place manque.
-    if (y > 225) { doc.addPage(); y = M + 10; }
+    // --- Totaux ---
+    if (y > 218) {
+        doc.addPage();
+        y = M + 12;
+    }
     const vent = ventiler(devis.lignes || []);
     const totalTTC = (devis.lignes || []).reduce((s, l) => s + l.price * l.qty, 0);
     const totalTGC = vent.reduce((s, e) => s + e.tgc, 0);
-    const xLib = 130;
-    doc.setFontSize(10);
+    const xLib = 128;
+    doc.setFontSize(9.5);
     doc.text("Total HT", xLib, y);
-    doc.text(fmtPdf(totalTTC - totalTGC), cTot - 2, y, { align: "right" });
+    doc.text(fmtPdf(totalTTC - totalTGC), xTot, y, { align: "right" });
     y += 5;
     vent.filter((e) => e.taux > 0).forEach((e) => {
-        doc.text("TGC " + e.taux + " %", xLib, y);
-        doc.text(fmtPdf(e.tgc), cTot - 2, y, { align: "right" });
+        doc.text("TGC " + e.taux + " % sur " + fmtPdf(e.ht), xLib, y);
+        doc.text(fmtPdf(e.tgc), xTot, y, { align: "right" });
         y += 5;
     });
-    doc.setFillColor(194, 53, 42);
-    doc.rect(xLib - 4, y - 4, 210 - M - xLib + 4, 9, "F");
+    doc.setFillColor(214, 31, 26);
+    doc.rect(xLib - 4, y - 4, DROITE - xLib + 4, 9, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
+    doc.setFontSize(11.5);
     doc.text("TOTAL TTC", xLib, y + 2);
-    doc.text(fmtPdf(totalTTC), cTot - 2, y + 2, { align: "right" });
+    doc.text(fmtPdf(totalTTC), xTot, y + 2, { align: "right" });
     doc.setTextColor(20, 20, 20);
     doc.setFont("helvetica", "normal");
-    y += 18;
-    if (y > 245) { doc.addPage(); y = M + 10; }
-    doc.setFontSize(9);
-    doc.text("Devis valable " + (devis.validite || 30) + " jours à compter de sa date d'émission.", M, y);
-    y += 5;
-    if (devis.note) {
-        doc.splitTextToSize(String(devis.note), L).forEach((t) => { doc.text(t, M, y); y += 4.5; });
+    y += 16;
+    // --- Note et signature ---
+    if (y > 240) {
+        doc.addPage();
+        y = M + 12;
     }
-    y += 8;
+    doc.setFontSize(9);
+    if (devis.note) {
+        doc.splitTextToSize(String(devis.note), L).forEach((t) => {
+            doc.text(t, M, y);
+            y += 4.5;
+        });
+        y += 4;
+    }
     doc.text("Bon pour accord, le ....... / ....... / ..........", M, y);
     doc.text("Signature du client :", 120, y);
     doc.setDrawColor(150, 150, 150);
-    doc.rect(120, y + 3, 78, 24);
-    // Pied de page et pagination sur chaque page
+    doc.setLineWidth(0.3);
+    doc.rect(120, y + 3, 78, 22);
+    // --- Coordonnées bancaires et pied de page, sur la dernière page ---
     const total = doc.getNumberOfPages();
+    doc.setPage(total);
+    doc.setFontSize(8);
+    doc.setTextColor(140, 140, 140);
+    let yb = 272;
+    BANQUE.forEach((t) => {
+        doc.text(t, M, yb);
+        yb += 4;
+    });
     for (let i = 1; i <= total; i++) {
         doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(120, 120, 120);
-        doc.text("TOTO — Plats à emporter, traiteur — Tél. 45 98 23 — Lundi au vendredi, 9h-14h", 105, 288, { align: "center" });
+        doc.setFontSize(7.5);
+        doc.setTextColor(150, 150, 150);
+        doc.text(SOCIETE.nom + " — " + SOCIETE.adresse + " — " + SOCIETE.tel, 105, 288, { align: "center" });
         if (total > 1)
-            doc.text(devis.numero + " - page " + i + "/" + total, 210 - 12, 288, { align: "right" });
+            doc.text(devis.numero + " — page " + i + "/" + total, DROITE, 288, { align: "right" });
     }
     return doc.output("blob");
 }
@@ -1368,6 +1463,7 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
     const [lignes, setLignes] = useState([]);
     const [validite, setValidite] = useState(30);
     const [note, setNote] = useState("");
+    const [objet, setObjet] = useState("");
     const [libre, setLibre] = useState({ name: "", price: "", tgc: 6 });
     const [recherche, setRecherche] = useState("");
     const [suggClient, setSuggClient] = useState(false);
@@ -1424,7 +1520,7 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
         setLibre({ name: "", price: "", tgc: 6 });
     }
     function changerQte(id, d) { setLignes((prev) => prev.map((l) => (l.id === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0)); }
-    function vider() { setLignes([]); setClient({ societe: "", nom: "", tel: "", email: "" }); setNote(""); }
+    function vider() { setLignes([]); setClient({ societe: "", nom: "", tel: "", email: "" }); setNote(""); setObjet(""); setRecherche(""); }
     // Échap referme les listes de suggestions sans vider le devis en cours.
     useEffect(() => {
         function onKey(e) {
@@ -1450,6 +1546,7 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
             totalTTC: totalTTC,
             totalTGC: totalTGC,
             validite: Number(validite) || 30,
+            objet: objet,
             note: note,
         };
     }
@@ -1507,6 +1604,9 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote }) {
                     React.createElement("div", null,
                         React.createElement("label", { style: label }, "E-mail"),
                         React.createElement("input", { value: client.email, onChange: (e) => setClient({ ...client, email: e.target.value }), style: champ, inputMode: "email", placeholder: "client@exemple.nc" }))),
+                React.createElement("div", null,
+                    React.createElement("label", { style: label }, "Objet du devis"),
+                    React.createElement("input", { value: objet, onChange: (e) => setObjet(e.target.value), style: champ, placeholder: "Ex : Commande de repas pour 60 personnes" })),
                 React.createElement("div", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED, margin: "10px 0 8px" } }, "Ajouter une ligne"),
                 React.createElement("div", null,
                     React.createElement("label", { style: label }, "Depuis la carte"),

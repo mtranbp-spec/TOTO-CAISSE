@@ -45,9 +45,13 @@
   @keyframes toto-spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 640px) {
+    /* L'encoche et la barre d'état de l'iPhone recouvrent le haut de la page :
+       viewport-fit=cover fait démarrer le contenu sous elles. On rend la
+       hauteur réservée par le système. */
+    .toto-header { padding-top: calc(12px + env(safe-area-inset-top)) !important; padding-bottom: 12px !important; }
     .toto-ptr {
       display: flex; align-items: center; justify-content: center;
-      position: fixed; top: 8px; left: 50%;
+      position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%;
       width: 38px; height: 38px; border-radius: 999px;
       background: #221D1A; border: 1px solid #3A322C;
       z-index: 45; pointer-events: none;
@@ -759,7 +763,10 @@ function TirerPourRafraichir() {
         // On ignore le geste s'il part d'une zone qui a sa propre logique
         // tactile : réorganisation, ticket défilant, champs de saisie.
         function zoneReservee(t) {
-            return !!(t && t.closest && t.closest(".toto-drag, .toto-ticket, .toto-tabs, input, textarea, select, button"));
+            // On n'exclut PAS les boutons : les tuiles de produits en sont, et
+            // le geste ne pouvait alors jamais partir de la Caisse. Un simple
+            // appui ne parcourt aucune distance, il ne risque rien.
+            return !!(t && t.closest && t.closest(".toto-drag, .toto-ticket, .toto-tabs, input, textarea, select"));
         }
         function peindre(d) {
             const el = repere.current;
@@ -1217,7 +1224,7 @@ function App() {
     }
     return (React.createElement("div", { style: { background: BG, minHeight: "100vh" } },
         React.createElement(TirerPourRafraichir, null),
-        React.createElement("div", { className: "flex items-center justify-between", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
+        React.createElement("div", { className: "toto-header", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
                 React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 512 512", fill: "none" },
                     React.createElement("circle", { cx: "256", cy: "256", r: "200", stroke: ACCENT, strokeWidth: "18" }),

@@ -337,7 +337,8 @@ const BANQUE = [
     "Banque : Banque Calédonienne d'Investissement (BCI)",
     "RIB : 17499 00012 17103202012 66",
 ];
-async function genererPdfDevis(devis) {
+async function genererPdfDevis(devis, type) {
+    const estFacture = type === "facture";
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const M = 12, DROITE = 210 - M, L = 210 - M * 2;
@@ -353,7 +354,7 @@ async function genererPdfDevis(devis) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(24);
     doc.setTextColor(214, 31, 26);
-    doc.text("DEVIS", DROITE, yd, { align: "right" });
+    doc.text(estFacture ? "FACTURE" : "DEVIS", DROITE, yd, { align: "right" });
     yd += 8;
     doc.setTextColor(20, 20, 20);
     doc.setFontSize(12);
@@ -399,24 +400,39 @@ async function genererPdfDevis(devis) {
         }
     });
     if (!c.societe && !c.nom)
-        doc.text("—", M + 4, y + 12);
+        doc.text(estFacture ? "Vente comptoir" : "—", M + 4, y + 12);
     let yr = y + 6;
     doc.setFontSize(9);
     doc.setFont("helvetica", "bold");
-    doc.text("Devis n° : ", milieu + 4, yr);
+    doc.text((estFacture ? "Facture n° : " : "Devis n° : "), milieu + 4, yr);
     doc.setFont("helvetica", "normal");
-    doc.text(String(devis.numero), milieu + 22, yr);
+    doc.text(String(devis.numero), milieu + (estFacture ? 27 : 22), yr);
     yr += 5;
     doc.setFont("helvetica", "bold");
-    doc.text("Date du devis : ", milieu + 4, yr);
+    doc.text(estFacture ? "Date : " : "Date du devis : ", milieu + 4, yr);
     doc.setFont("helvetica", "normal");
-    doc.text(new Date(devis.createdAt).toLocaleDateString("fr-FR"), milieu + 30, yr);
+    const dDoc = new Date(devis.createdAt);
+    doc.text(estFacture ? dDoc.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : dDoc.toLocaleDateString("fr-FR"), milieu + (estFacture ? 17 : 30), yr);
     yr += 5;
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(8.5);
-    doc.text("Devis valable " + (devis.validite || 30) + " jours à compter de sa date d'émission.", milieu + 4, yr);
-    yr += 4;
-    doc.text("Passé ce délai, les tarifs et disponibilités pourront être révisés.", milieu + 4, yr);
+    if (estFacture) {
+        if (devis.vendeur) {
+            doc.setFont("helvetica", "bold");
+            doc.text("Vendeur : ", milieu + 4, yr);
+            doc.setFont("helvetica", "normal");
+            doc.text(String(devis.vendeur), milieu + 22, yr);
+            yr += 5;
+        }
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        doc.text("Facture acquittée. Merci de votre visite.", milieu + 4, yr);
+    }
+    else {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8.5);
+        doc.text("Devis valable " + (devis.validite || 30) + " jours à compter de sa date d'émission.", milieu + 4, yr);
+        yr += 4;
+        doc.text("Passé ce délai, les tarifs et disponibilités pourront être révisés.", milieu + 4, yr);
+    }
     doc.setFont("helvetica", "normal");
     y += hBloc + 7;
     // --- Objet ---
@@ -510,11 +526,13 @@ async function genererPdfDevis(devis) {
         });
         y += 4;
     }
-    doc.text("Bon pour accord, le ....... / ....... / ..........", M, y);
-    doc.text("Signature du client :", 120, y);
-    doc.setDrawColor(150, 150, 150);
-    doc.setLineWidth(0.3);
-    doc.rect(120, y + 3, 78, 22);
+    if (!estFacture) {
+        doc.text("Bon pour accord, le ....... / ....... / ..........", M, y);
+        doc.text("Signature du client :", 120, y);
+        doc.setDrawColor(150, 150, 150);
+        doc.setLineWidth(0.3);
+        doc.rect(120, y + 3, 78, 22);
+    }
     // --- Coordonnées bancaires et pied de page, sur la dernière page ---
     const total = doc.getNumberOfPages();
     doc.setPage(total);
@@ -535,10 +553,10 @@ async function genererPdfDevis(devis) {
     }
     return doc.output("blob");
 }
-async function apercuDevis(devis, showToast) {
+async function apercuDevis(devis, showToast, type) {
     let blob;
     try {
-        blob = await genererPdfDevis(devis);
+        blob = await genererPdfDevis(devis, type);
     }
     catch (e) {
         showToast("⚠️ Aperçu impossible : " + (e.message || "erreur"));
@@ -559,18 +577,19 @@ async function apercuDevis(devis, showToast) {
     }
     setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-async function envoyerDevis(devis, showToast) {
+async function envoyerDevis(devis, showToast, type) {
     let blob;
     try {
-        blob = await genererPdfDevis(devis);
+        blob = await genererPdfDevis(devis, type);
     }
     catch (e) {
         showToast("⚠️ PDF impossible : " + (e.message || "erreur"));
         return;
     }
     const nomFichier = devis.numero + ".pdf";
-    const sujet = "Devis " + devis.numero + " - TOTO";
-    const corps = "Bonjour,\n\nVeuillez trouver ci-joint le devis " + devis.numero + " d'un montant de "
+    const mot = type === "facture" ? "facture" : "devis";
+    const sujet = (type === "facture" ? "Facture " : "Devis ") + devis.numero + " - TOTO";
+    const corps = "Bonjour,\n\nVeuillez trouver ci-joint la " + mot + " " + devis.numero + " d'un montant de "
         + fmt((devis.lignes || []).reduce((s, l) => s + l.price * l.qty, 0)) + " TTC.\n\nCordialement,\nTOTO - 45 98 23";
     const fichier = new File([blob], nomFichier, { type: "application/pdf" });
     // Partage natif quand le systeme le propose : le PDF part reellement en
@@ -860,6 +879,14 @@ function App() {
     const [catsLoaded, setCatsLoaded] = useState(false);
     const [reorderPos, setReorderPos] = useState(false);
     const [quotes, setQuotes] = useState([]);
+    const [vendeurs, setVendeurs] = useState([]);
+    // Le vendeur choisi est propre à l'appareil : la tablette de la caisse et
+    // le téléphone du gérant n'ont pas le même utilisateur devant eux.
+    const [vendeur, setVendeur] = useState(() => { try { return localStorage.getItem("toto-vendeur") || ""; } catch (e) { return ""; } });
+    const [nouveauVendeur, setNouveauVendeur] = useState(null);
+    const [libreTicket, setLibreTicket] = useState(null);
+    const [factureEditee, setFactureEditee] = useState(null);
+    const [prixEnEdition, setPrixEnEdition] = useState(null);
     const toastTimer = useRef(null);
     useEffect(() => {
         const db = getDb();
@@ -883,12 +910,13 @@ function App() {
             setSyncStatus("live");
         }, () => setSyncStatus("error"));
         const unsubSales = db.collection("sales").onSnapshot((snap) => setSales(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setSyncStatus("error"));
+        const unsubVendeurs = db.collection("vendeurs").onSnapshot((snap) => setVendeurs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => { });
         const unsubQuotes = db.collection("quotes").onSnapshot((snap) => setQuotes(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => { });
         const unsubCats = db.collection("categories").onSnapshot((snap) => {
             setCatDocs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
             setCatsLoaded(true);
         }, () => setSyncStatus("error"));
-        return () => { unsubProducts(); unsubSales(); unsubCats(); unsubQuotes(); };
+        return () => { unsubProducts(); unsubSales(); unsubCats(); unsubQuotes(); unsubVendeurs(); };
     }, []);
     // Amorçage : les catégories n'existaient qu'implicitement dans les produits.
     // Au premier lancement on les matérialise en documents, avec leurs couleurs
@@ -927,6 +955,16 @@ function App() {
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [editing, reorderPos]);
+    useEffect(() => { try { localStorage.setItem("toto-vendeur", vendeur || ""); } catch (e) { } }, [vendeur]);
+    function ajouterVendeur(nom) {
+        const db = getDb();
+        const propre = String(nom || "").trim();
+        if (!db || !propre)
+            return Promise.reject(new Error("Nom vide."));
+        if (vendeurs.some((v) => normaliser(v.name) === normaliser(propre)))
+            return Promise.reject(new Error("Ce vendeur existe déjà."));
+        return db.collection("vendeurs").doc("v" + Date.now()).set({ name: propre });
+    }
     function showToast(msg) {
         setToast(msg);
         if (toastTimer.current)
@@ -1164,17 +1202,45 @@ function App() {
             return [...prev, { id: product.id, name: product.name, price: product.price, tgc: product.tgc || 0, qty: 1 }];
         });
     }
+    function ajouterLibreAuTicket(nom, prix, taux) {
+        const pv = parseFloat(String(prix).replace(",", "."));
+        if (!String(nom).trim() || isNaN(pv) || pv < 0) {
+            showToast("Vérifie le libellé et le prix.");
+            return false;
+        }
+        setCart((prev) => [...prev, { id: "divers" + Date.now(), name: String(nom).trim(), price: pv, tgc: Number(taux) || 0, qty: 1, libre: true }]);
+        return true;
+    }
+    // Le prix modifié ne vaut que pour ce ticket : la fiche produit n'est pas
+    // touchée, sinon une remise ponctuelle changerait le tarif pour tous.
+    function changerPrixLigne(id, prix) {
+        const pv = parseFloat(String(prix).replace(",", "."));
+        if (isNaN(pv) || pv < 0)
+            return;
+        setCart((prev) => prev.map((it) => (it.id === id ? { ...it, price: pv, prixModifie: true } : it)));
+    }
     function changeQty(id, delta) {
         setCart((prev) => prev.map((it) => (it.id === id ? { ...it, qty: it.qty + delta } : it)).filter((it) => it.qty > 0));
     }
     function removeFromCart(id) { setCart((prev) => prev.filter((it) => it.id !== id)); }
     function clearCart() { setCart([]); }
-    function checkout() {
+    function numeroFactureSuivant() {
+        const annee = new Date().getFullYear();
+        const prefixe = "F" + annee + "-";
+        const nums = sales
+            .filter((v) => typeof v.numero === "string" && v.numero.indexOf(prefixe) === 0)
+            .map((v) => parseInt(v.numero.slice(prefixe.length), 10))
+            .filter((n) => !isNaN(n));
+        return prefixe + ((nums.length ? Math.max(...nums) : 0) + 1);
+    }
+    function checkout(editer) {
         if (cart.length === 0)
             return;
         const now = new Date();
         const saleId = "s" + now.getTime();
         const sale = {
+            numero: numeroFactureSuivant(),
+            vendeur: vendeur || "",
             timestamp: now.toISOString(),
             dateKey: todayKey(),
             // On fige le taux dans la vente : un changement de TGC plus tard ne doit
@@ -1183,13 +1249,28 @@ function App() {
             total: cartTotal,
         };
         setCart([]);
-        showToast(`Encaissé : ${fmt(sale.total)}`);
+        setPrixEnEdition(null);
         const db = getDb();
         if (db) {
             db.collection("sales").doc(saleId).set(sale).catch(() => {
                 showToast("⚠️ Pas de connexion — la vente sera envoyée dès le retour du réseau.");
             });
         }
+        if (editer)
+            setFactureEditee({ id: saleId, ...sale });
+        else
+            showToast(`Encaissé : ${fmt(sale.total)} — ${sale.numero}`);
+    }
+    // Une vente enregistrée devient une facture : même document que le devis,
+    // avec l'en-tête et les mentions adaptés.
+    function factureDepuisVente(v) {
+        return {
+            numero: v.numero || "Sans numéro",
+            createdAt: v.timestamp || new Date().toISOString(),
+            client: v.client || {},
+            vendeur: v.vendeur || "",
+            lignes: (v.items || []).map((it) => ({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })),
+        };
     }
     function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture", tgc: 0 }); setEditing("new"); }
     function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category, tgc: p.tgc || 0 }); setEditing(p.id); }
@@ -1248,7 +1329,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -1285,23 +1366,30 @@ function App() {
                     })),
             React.createElement("div", { className: "toto-ticket", style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
                 React.createElement("div", { className: "toto-ticket-card", style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
-                    React.createElement("div", { className: "toto-ticket-head", style: { padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, borderBottom: `1px dashed ${LINE}` } },
+                    React.createElement("div", { className: "toto-ticket-head", style: { padding: "10px 12px", borderBottom: `1px dashed ${LINE}` } },
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8 } },
+                            React.createElement("select", { value: vendeur, onChange: (e) => setVendeur(e.target.value), style: { flex: 1, padding: "7px 10px", borderRadius: 8, fontSize: 12, background: BG, color: vendeur ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                                React.createElement("option", { value: "" }, "Vendeur…"),
+                                vendeurs.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((v) => React.createElement("option", { key: v.id, value: v.name }, v.name))),
+                            React.createElement("button", { onClick: () => setNouveauVendeur(""), title: "Nouveau vendeur", style: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
+                                React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }))),
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                         React.createElement(Icon.List, { size: 16, color: TEXT_MUTED }),
                         React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT } }, "Ticket"),
-                        React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, color: TEXT_MUTED } },
-                            cartCount,
-                            " article",
-                            cartCount > 1 ? "s" : "")),
+                            React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, color: TEXT_MUTED } },
+                                cartCount,
+                                " article",
+                                cartCount > 1 ? "s" : ""))),
                     React.createElement("div", { className: "toto-ticket-items", style: { padding: "8px 16px", maxHeight: 360, overflowY: "auto" } }, cart.length === 0 ? (React.createElement("div", { style: { fontSize: 12, textAlign: "center", padding: "40px 0", color: TEXT_MUTED } },
                         "Le ticket est vide.",
                         React.createElement("br", null),
                         "Touche un produit pour commencer.")) : cart.map((it) => (React.createElement("div", { key: it.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${LINE}` } },
                         React.createElement("div", { style: { flex: 1, minWidth: 0 } },
                             React.createElement("div", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, it.name),
-                            React.createElement("div", { className: "tabnum", style: { fontSize: 12, color: TEXT_MUTED } },
-                                fmt(it.price),
-                                " \u00D7 ",
-                                it.qty)),
+                            prixEnEdition === it.id
+                                ? React.createElement("input", { defaultValue: it.price, autoFocus: true, inputMode: "numeric", onBlur: (e) => { changerPrixLigne(it.id, e.target.value); setPrixEnEdition(null); }, onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setPrixEnEdition(null); }, style: { width: 84, marginTop: 2, padding: "3px 6px", borderRadius: 6, fontSize: 12, background: BG, color: TEXT, border: `1px solid ${GOLD}` } })
+                                : React.createElement("button", { onClick: () => setPrixEnEdition(it.id), title: "Modifier le prix pour ce ticket", className: "tabnum", style: { padding: 0, background: "transparent", fontSize: 12, color: it.prixModifie ? GOLD : TEXT_MUTED, textDecoration: "underline dotted" } },
+                                    fmt(it.price) + " \u00D7 " + it.qty)),
                         React.createElement("button", { onClick: () => changeQty(it.id, -1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
                             React.createElement(Icon.Minus, { size: 13, color: TEXT })),
                         React.createElement("span", { className: "tabnum", style: { fontSize: 14, width: 16, textAlign: "center", color: TEXT } }, it.qty),
@@ -1325,8 +1413,39 @@ function App() {
                         React.createElement("div", { className: "toto-total", style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 } },
                             React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL TTC"),
                             React.createElement("span", { className: "tabnum font-display", style: { fontSize: 24, color: GOLD } }, fmt(cartTotal))),
-                        React.createElement("button", { onClick: checkout, disabled: cart.length === 0, className: "font-display toto-encaisser", style: { width: "100%", padding: "14px 0", borderRadius: 12, fontSize: 16, fontWeight: 600, marginBottom: 8, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff", opacity: cart.length === 0 ? 0.6 : 1 } }, "Encaisser"),
-                        cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { width: "100%", padding: "8px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider le ticket")))))),
+                        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
+                            React.createElement("button", { onClick: () => checkout(false), disabled: cart.length === 0, className: "font-display toto-encaisser", style: { flex: 2, padding: "14px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff" } }, "Encaisser"),
+                            React.createElement("button", { onClick: () => checkout(true), disabled: cart.length === 0, title: "Encaisser puis imprimer ou envoyer la facture", className: "font-display toto-encaisser", style: { flex: 1, padding: "14px 0", borderRadius: 12, fontSize: 13, fontWeight: 600, background: cart.length === 0 ? LINE : PANEL, color: cart.length === 0 ? TEXT_MUTED : TEXT, border: `1px solid ${cart.length === 0 ? LINE : ACCENT_GREEN}` } }, "+ Facture")),
+                        React.createElement("div", { style: { display: "flex", gap: 6 } },
+                            React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
+                            cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
+        nouveauVendeur !== null && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Nouveau vendeur"),
+                React.createElement("input", { value: nouveauVendeur, autoFocus: true, onChange: (e) => setNouveauVendeur(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }, style: { width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Prénom" }),
+                React.createElement("button", { onClick: () => { const n = nouveauVendeur; ajouterVendeur(n).then(() => { setVendeur(n.trim()); setNouveauVendeur(null); showToast("Vendeur ajouté"); }).catch((e) => showToast("⚠️ " + e.message)); }, disabled: !String(nouveauVendeur).trim(), className: "font-display", style: { width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: String(nouveauVendeur).trim() ? ACCENT_GREEN : LINE, color: String(nouveauVendeur).trim() ? "#fff" : TEXT_MUTED } }, "Ajouter"),
+                React.createElement("button", { onClick: () => setNouveauVendeur(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
+        libreTicket && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Ligne divers"),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Libellé"),
+                React.createElement("input", { value: libreTicket.name, autoFocus: true, onChange: (e) => setLibreTicket({ ...libreTicket, name: e.target.value }), style: { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Supplément sauce" }),
+                React.createElement("div", { style: { display: "flex", gap: 8 } },
+                    React.createElement("div", { style: { flex: 1 } },
+                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Prix TTC"),
+                        React.createElement("input", { value: libreTicket.price, inputMode: "numeric", onChange: (e) => setLibreTicket({ ...libreTicket, price: e.target.value }), style: { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "0" })),
+                    React.createElement("div", { style: { width: 96 } },
+                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "TGC"),
+                        React.createElement("select", { value: libreTicket.tgc, onChange: (e) => setLibreTicket({ ...libreTicket, tgc: Number(e.target.value) }), style: { width: "100%", marginTop: 4, padding: "10px 8px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %"))))),
+                React.createElement("button", { onClick: () => { if (ajouterLibreAuTicket(libreTicket.name, libreTicket.price, libreTicket.tgc)) setLibreTicket(null); }, className: "font-display", style: { width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Ajouter au ticket"),
+                React.createElement("button", { onClick: () => setLibreTicket(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
+        factureEditee && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 4 } }, "Encaissé — " + fmt(factureEditee.total || 0)),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 16 } }, "Facture " + factureEditee.numero + (factureEditee.vendeur ? " · " + factureEditee.vendeur : "")),
+                React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(factureEditee), showToast, "facture"), style: { width: "100%", padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
+                React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(factureEditee), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client"),
+                React.createElement("button", { onClick: () => setFactureEditee(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Client suivant"))),
         toast && (React.createElement("div", { className: "toto-toast", style: { position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 24, padding: "10px 16px", borderRadius: 999, fontSize: 14, fontWeight: 500, background: INK, color: "#fff", border: `1px solid ${LINE}`, zIndex: 50 } }, toast))));
 }
 function TabButton({ active, onClick, children, icon }) {
@@ -1347,7 +1466,9 @@ function KpiCard({ label, value, color }) {
         React.createElement("div", { style: { fontSize: 11, marginBottom: 4, color: TEXT_MUTED } }, label),
         React.createElement("div", { className: "tabnum font-display", style: { fontSize: 18, color } }, value)));
 }
-function StatsView({ period, setPeriod, currentLabel, trend, stats }) {
+function StatsView({ period, setPeriod, currentLabel, trend, stats, ventes, showToast, factureDepuisVente }) {
+    const [detail, setDetail] = useState(null);
+    const ventesTriees = useMemo(() => (ventes || []).slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))), [ventes]);
     const maxCa = Math.max(1, ...trend.map((t) => t.ca));
     const bestProduit = stats.topProduits[0];
     return (React.createElement("div", { style: { padding: 20 } },
@@ -1377,7 +1498,36 @@ function StatsView({ period, setPeriod, currentLabel, trend, stats }) {
                         React.createElement("div", { style: { height: 6, borderRadius: 999, width: `${bestProduit ? (p.qty / bestProduit.qty) * 100 : 0}%`, background: ACCENT } }))),
                 React.createElement("div", { style: { textAlign: "right" } },
                     React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: TEXT } }, p.qty),
-                    React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca)))))))))));
+                    React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca))))))))),
+        React.createElement("div", { style: { borderRadius: 16, padding: 16, marginTop: 24, background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { className: "font-display", style: { fontSize: 12, marginBottom: 14, color: TEXT_MUTED } },
+                "Tickets encaissés \u2014 " + currentLabel.toLowerCase() + " (" + ventesTriees.length + ")"),
+            ventesTriees.length === 0
+                ? React.createElement("div", { style: { fontSize: 12, padding: "24px 0", textAlign: "center", color: TEXT_MUTED } }, "Aucun ticket sur cette période.")
+                : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } }, ventesTriees.map((v) => React.createElement("button", { key: v.id, onClick: () => setDetail(v), style: { display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
+                    React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                        React.createElement("div", { style: { fontSize: 13, color: TEXT } }, v.numero || "Sans numéro"),
+                        React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                            [v.timestamp ? new Date(v.timestamp).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "",
+                                v.vendeur || null,
+                                (v.items || []).length + " article" + ((v.items || []).length > 1 ? "s" : "")].filter(Boolean).join(" · "))),
+                    React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(v.total || 0)))))),
+        detail && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { style: { width: "100%", maxWidth: 400, maxHeight: "84vh", overflowY: "auto", borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 } },
+                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, detail.numero || "Ticket"),
+                    React.createElement("button", { onClick: () => setDetail(null), style: { background: "transparent" } }, React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } },
+                    [detail.timestamp ? new Date(detail.timestamp).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" }) : "", detail.vendeur ? "Vendu par " + detail.vendeur : null].filter(Boolean).join(" · ")),
+                (detail.items || []).map((it, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${LINE}` } },
+                    React.createElement("span", { style: { flex: 1, fontSize: 13, color: TEXT } }, it.name),
+                    React.createElement("span", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, width: 62, textAlign: "right" } }, fmt(it.price) + " \u00D7 " + it.qty),
+                    React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD, width: 74, textAlign: "right" } }, fmt(it.price * it.qty)))),
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 } },
+                    React.createElement("span", { className: "font-display", style: { fontSize: 13, color: TEXT_MUTED } }, "TOTAL TTC"),
+                    React.createElement("span", { className: "tabnum font-display", style: { fontSize: 20, color: GOLD } }, fmt(detail.total || 0))),
+                React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(detail), showToast, "facture"), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer la facture"),
+                React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(detail), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer par mail")))));
 }
 function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
     const [activeCategory, setActiveCategory] = useState("Toutes");

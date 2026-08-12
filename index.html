@@ -40,6 +40,10 @@
   /* Sur téléphone, la navigation passe en barre basse : c'est là que le pouce
      tombe naturellement. Les !important sont nécessaires pour l'emporter sur
      les styles en ligne des composants. */
+  /* L'appareil photo n'a de sens que sur mobile : sur ordinateur on tape le
+     code ou on le scanne à la douchette. */
+  .toto-cam-mobile { display: none; }
+  @media (max-width: 640px) { .toto-cam-mobile { display: flex; } }
   /* Repère du geste « tirer pour rafraîchir ». Masqué hors téléphone. */
   .toto-ptr { display: none; }
   @keyframes toto-spin { to { transform: rotate(360deg); } }
@@ -885,7 +889,7 @@ function chargerZXing() {
     });
     return zxingCharge;
 }
-function ScannerCamera({ onCode, onFermer, showToast }) {
+function ScannerCamera({ onCode, onFermer, showToast, fermerApres, titre }) {
     const video = useRef(null);
     const lecteur = useRef(null);
     const dernier = useRef({ code: "", t: 0 });
@@ -893,6 +897,7 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
     const [etat, setEtat] = useState("chargement");
     const [erreur, setErreur] = useState(null);
     const [flash, setFlash] = useState(false);
+    const [compte, setCompte] = useState(0);
     // Le son est fabriqué à la volée : pas de fichier à télécharger, et pas de
     // délai au premier bip. Le contexte audio est créé à l'ouverture, geste
     // utilisateur sans lequel iOS refuserait de jouer quoi que ce soit.
@@ -960,6 +965,11 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
                     // sans avoir à toucher l'écran. Un code inconnu laisse la
                     // caméra ouverte pour réessayer.
                     if (reconnu)
+                        setCompte((n) => n + 1);
+                    // On ne referme qu'en mode saisie d'un code produit : en
+                    // caisse, le vendeur enchaîne les articles et sort quand
+                    // il a fini.
+                    if (reconnu && fermerApres)
                         setTimeout(onFermer, 320);
                 };
                 const contraintes = { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } } };
@@ -1012,10 +1022,13 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
         // Cadre de visée : purement indicatif, la lecture se fait sur toute l'image.
         React.createElement("div", { style: { position: "absolute", left: "8%", right: "8%", top: "34%", height: "22%", border: `2px solid ${ACCENT_GREEN}`, borderRadius: 12, boxShadow: "0 0 0 9999px rgba(0,0,0,0.35)", pointerEvents: "none" } }),
         React.createElement("div", { style: { position: "absolute", top: "calc(14px + env(safe-area-inset-top))", left: 0, right: 0, textAlign: "center", color: "#fff", fontSize: 13, textShadow: "0 1px 3px rgba(0,0,0,0.8)", pointerEvents: "none" } },
-            etat === "chargement" ? "Préparation de la caméra…" : etat === "actif" ? "Présente le code-barres dans le cadre" : ""),
+            etat === "chargement" ? "Préparation de la caméra…" : etat === "actif" ? (titre || "Présente le code-barres dans le cadre") : ""),
+        compte > 0 && React.createElement("div", { style: { position: "absolute", top: "calc(42px + env(safe-area-inset-top))", left: 0, right: 0, textAlign: "center", pointerEvents: "none" } },
+            React.createElement("span", { className: "font-display", style: { padding: "6px 16px", borderRadius: 999, background: ACCENT_GREEN, color: "#fff", fontSize: 13 } },
+                compte + " article" + (compte > 1 ? "s" : "") + " ajouté" + (compte > 1 ? "s" : ""))),
         React.createElement("div", { style: { position: "absolute", inset: 0, background: "#fff", opacity: flash ? 0.85 : 0, transition: flash ? "none" : "opacity 220ms ease", pointerEvents: "none" } }),
         erreur && React.createElement("div", { style: { position: "absolute", top: "45%", left: 20, right: 20, padding: 16, borderRadius: 12, background: PANEL, border: `1px solid ${LINE}`, color: TEXT, fontSize: 13, textAlign: "center" } }, erreur),
-        React.createElement("button", { onClick: onFermer, className: "font-display", style: { position: "absolute", bottom: "calc(24px + env(safe-area-inset-bottom))", left: 24, right: 24, padding: "15px 0", borderRadius: 999, fontSize: 15, fontWeight: 600, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }, "Terminer"));
+        React.createElement("button", { onClick: onFermer, className: "font-display", style: { position: "absolute", bottom: "calc(24px + env(safe-area-inset-bottom))", left: 24, right: 24, padding: "15px 0", borderRadius: 999, fontSize: 15, fontWeight: 600, background: compte > 0 ? ACCENT_GREEN : PANEL, color: compte > 0 ? "#fff" : TEXT, border: `1px solid ${compte > 0 ? ACCENT_GREEN : LINE}` } }, compte > 0 ? "Terminer — " + compte + " article" + (compte > 1 ? "s" : "") : "Terminer"));
 }
 /* ---------- App ---------- */
 function App() {
@@ -1043,6 +1056,7 @@ function App() {
     const [factureEditee, setFactureEditee] = useState(null);
     const [prixEnEdition, setPrixEnEdition] = useState(null);
     const [camera, setCamera] = useState(false);
+    const [cameraEan, setCameraEan] = useState(false);
     const toastTimer = useRef(null);
     useEffect(() => {
         const db = getDb();
@@ -1562,7 +1576,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -1655,7 +1669,8 @@ function App() {
                         React.createElement("div", { style: { display: "flex", gap: 6 } },
                             React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
                             cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
-        camera && React.createElement(ScannerCamera, { showToast: showToast, onFermer: () => setCamera(false), onCode: (code) => scanner(code) }),
+        camera && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: false, onFermer: () => setCamera(false), onCode: (code) => scanner(code) }),
+        cameraEan && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: true, titre: "Scanne l'article pour enregistrer son code", onFermer: () => setCameraEan(false), onCode: (code) => { setFormError(null); setForm((f) => ({ ...f, ean: String(code).replace(/\s/g, "") })); showToast("Code lu : " + code); return true; } }),
         nouveauVendeur !== null && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
             React.createElement("div", { style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Nouveau vendeur"),
@@ -1766,7 +1781,7 @@ function StatsView({ period, setPeriod, currentLabel, trend, stats, ventes, show
                 React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(detail), showToast, "facture"), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer la facture"),
                 React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(detail), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer par mail")))));
 }
-function ManageView({ products, categories, catDocs, editing, form, setForm, formError, setFormError, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
+function ManageView({ products, categories, catDocs, editing, form, setForm, formError, setFormError, ouvrirCameraEan, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
     const [activeCategory, setActiveCategory] = useState("Toutes");
     const [catForm, setCatForm] = useState(null); // { id, name, color } — id null = création
     const [catBusy, setCatBusy] = useState(false);
@@ -1940,7 +1955,10 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                         "Prix TTC " + fmt(pv) + " → " + fmt(htDepuisTTC(pv, tx)) + " HT + " + fmt(tgcDepuisTTC(pv, tx)) + " de TGC");
                 })(),
                 React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "Code-barres (EAN)"),
-                React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: e.target.value }); }, style: { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, inputMode: "numeric", placeholder: "Clique ici puis scanne l'article" }),
+                React.createElement("div", { style: { position: "relative", marginTop: 4 } },
+                    React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: e.target.value }); }, style: { width: "100%", padding: "10px 12px", paddingRight: 46, borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, inputMode: "numeric", placeholder: "Clique ici puis scanne l'article" }),
+                    React.createElement("button", { onClick: ouvrirCameraEan, title: "Scanner avec l'appareil photo", className: "toto-cam-mobile", style: { position: "absolute", right: 5, top: 5, width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
+                        React.createElement(Icon.Camera, { size: 15, color: TEXT_MUTED }))),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 4 } }, "Laisse vide pour un plat maison, qui n'a pas de code."),
                 formError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 8 } }, formError),
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),

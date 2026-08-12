@@ -274,6 +274,8 @@ const Icon = {
     Doc: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
         React.createElement("path", { d: "M14 2v6h6M8 13h8M8 17h5", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Export: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Camera: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
         React.createElement("circle", { cx: "12", cy: "13", r: "4", stroke: p.color || "#fff", strokeWidth: "2" })),
@@ -869,6 +871,133 @@ function TirerPourRafraichir() {
         React.createElement("svg", { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none" },
             React.createElement("path", { d: "M21 12a9 9 0 1 1-3.5-7.1", stroke: TEXT, strokeWidth: "2.2", strokeLinecap: "round" }),
             React.createElement("path", { d: "M21 3v6h-6", stroke: TEXT, strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" })));
+}
+/* ---------- Export Excel ----------
+   La bibliothèque pèse près d'un mégaoctet : elle n'est téléchargée qu'au
+   premier export, pas au démarrage de la caisse. */
+let xlsxCharge = null;
+function chargerXLSX() {
+    if (xlsxCharge)
+        return xlsxCharge;
+    xlsxCharge = new Promise((res, rej) => {
+        if (window.XLSX)
+            return res(window.XLSX);
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        s.onload = () => (window.XLSX ? res(window.XLSX) : rej(new Error("bibliothèque illisible")));
+        s.onerror = () => rej(new Error("téléchargement impossible"));
+        document.head.appendChild(s);
+    });
+    return xlsxCharge;
+}
+function arrondi2(n) { return Math.round(n * 100) / 100; }
+function dateFr(iso) {
+    if (!iso)
+        return "";
+    const d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleDateString("fr-FR");
+}
+function heureFr(iso) {
+    if (!iso)
+        return "";
+    const d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+async function exporterExcel(ventes, produits, libelle, showToast) {
+    let XLSX;
+    try {
+        XLSX = await chargerXLSX();
+    }
+    catch (e) {
+        showToast("⚠️ Export impossible : " + e.message);
+        return;
+    }
+    // 1) Une ligne par ticket
+    const fVentes = ventes.map((v) => {
+        const items = v.items || [];
+        const ttc = items.reduce((s, it) => s + it.price * it.qty, 0);
+        const tgc = items.reduce((s, it) => s + (it.price - htDepuisTTC(it.price, it.tgc)) * it.qty, 0);
+        return {
+            "Facture": v.numero || "",
+            "Date": dateFr(v.timestamp),
+            "Heure": heureFr(v.timestamp),
+            "Vendeur": v.vendeur || "",
+            "Articles": items.reduce((n, it) => n + it.qty, 0),
+            "Total HT": arrondi2(ttc - tgc),
+            "TGC": arrondi2(tgc),
+            "Total TTC": arrondi2(ttc),
+        };
+    });
+    // 2) Une ligne par article vendu : c'est la feuille qui permet les tableaux
+    //    croisés dynamiques dans Excel.
+    const fLignes = [];
+    ventes.forEach((v) => {
+        (v.items || []).forEach((it) => {
+            const ht = htDepuisTTC(it.price, it.tgc);
+            fLignes.push({
+                "Facture": v.numero || "",
+                "Date": dateFr(v.timestamp),
+                "Heure": heureFr(v.timestamp),
+                "Vendeur": v.vendeur || "",
+                "Produit": it.name,
+                "Quantité": it.qty,
+                "PU HT": arrondi2(ht),
+                "PU TTC": arrondi2(it.price),
+                "Taux TGC": (it.tgc || 0) / 100,
+                "Total HT": arrondi2(ht * it.qty),
+                "TGC": arrondi2((it.price - ht) * it.qty),
+                "Total TTC": arrondi2(it.price * it.qty),
+            });
+        });
+    });
+    // 3) Récapitulatif par taux : c'est ce qu'il faut pour la déclaration TGC.
+    const parTaux = new Map();
+    ventes.forEach((v) => {
+        (v.items || []).forEach((it) => {
+            const t = it.tgc || 0;
+            const e = parTaux.get(t) || { ttc: 0 };
+            e.ttc += it.price * it.qty;
+            parTaux.set(t, e);
+        });
+    });
+    const fTgc = Array.from(parTaux.entries()).sort((a, b) => a[0] - b[0]).map(([taux, e]) => ({
+        "Taux TGC": taux / 100,
+        "Base HT": arrondi2(htDepuisTTC(e.ttc, taux)),
+        "TGC collectée": arrondi2(e.ttc - htDepuisTTC(e.ttc, taux)),
+        "Total TTC": arrondi2(e.ttc),
+    }));
+    // 4) Le catalogue, avec la marge unitaire hors taxe
+    const fProduits = (produits || []).map((p) => {
+        const ht = htDepuisTTC(p.price, p.tgc);
+        return {
+            "Produit": p.name,
+            "Catégorie": p.category || "",
+            "Prix TTC": p.price,
+            "Prix HT": arrondi2(ht),
+            "Taux TGC": (p.tgc || 0) / 100,
+            "Coût d'achat": p.cost || 0,
+            "Marge HT": arrondi2(ht - (p.cost || 0)),
+            "Code-barres": p.ean || "",
+        };
+    });
+    const classeur = XLSX.utils.book_new();
+    const ajouter = (donnees, nom, largeurs) => {
+        const f = XLSX.utils.json_to_sheet(donnees.length ? donnees : [{ "Aucune donnée": "" }]);
+        f["!cols"] = largeurs.map((w) => ({ wch: w }));
+        XLSX.utils.book_append_sheet(classeur, f, nom);
+    };
+    ajouter(fVentes, "Ventes", [12, 11, 8, 14, 9, 11, 10, 11]);
+    ajouter(fLignes, "Détail des lignes", [12, 11, 8, 14, 32, 9, 10, 10, 9, 11, 10, 11]);
+    ajouter(fTgc, "Récapitulatif TGC", [10, 13, 15, 12]);
+    ajouter(fProduits, "Produits", [30, 15, 10, 10, 9, 12, 11, 16]);
+    const nom = "TOTO-" + String(libelle || "export").replace(/[^\w-]+/g, "-").toLowerCase() + "-" + todayKey() + ".xlsx";
+    try {
+        XLSX.writeFile(classeur, nom);
+        showToast("Export « " + nom + " » généré");
+    }
+    catch (e) {
+        showToast("⚠️ Écriture du fichier impossible : " + e.message);
+    }
 }
 /* ---------- Scan par l'appareil photo ----------
    Safari n'a pas l'API de lecture de codes-barres du navigateur : on charge
@@ -1576,7 +1705,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -1718,13 +1847,17 @@ function KpiCard({ label, value, color }) {
         React.createElement("div", { style: { fontSize: 11, marginBottom: 4, color: TEXT_MUTED } }, label),
         React.createElement("div", { className: "tabnum font-display", style: { fontSize: 18, color } }, value)));
 }
-function StatsView({ period, setPeriod, currentLabel, trend, stats, ventes, showToast, factureDepuisVente }) {
+function StatsView({ period, setPeriod, currentLabel, trend, stats, ventes, showToast, factureDepuisVente, produits }) {
+    const [exportEnCours, setExportEnCours] = useState(false);
     const [detail, setDetail] = useState(null);
     const ventesTriees = useMemo(() => (ventes || []).slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))), [ventes]);
     const maxCa = Math.max(1, ...trend.map((t) => t.ca));
     const bestProduit = stats.topProduits[0];
     return (React.createElement("div", { style: { padding: 20 } },
         React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 20 } }, [{ key: "jour", label: "Jour" }, { key: "mois", label: "Mois" }, { key: "annee", label: "Année" }].map((opt) => (React.createElement("button", { key: opt.key, onClick: () => setPeriod(opt.key), style: { padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: period === opt.key ? ACCENT : PANEL, color: period === opt.key ? "#fff" : TEXT_MUTED, border: `1px solid ${period === opt.key ? ACCENT : LINE}` } }, opt.label)))),
+        React.createElement("button", { onClick: () => { setExportEnCours(true); exporterExcel(ventes || [], produits || [], currentLabel, showToast).then(() => setExportEnCours(false)); }, disabled: exportEnCours, style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", marginBottom: 16, borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: exportEnCours ? TEXT_MUTED : TEXT, border: `1px solid ${LINE}` } },
+            React.createElement(Icon.Export, { size: 14, color: exportEnCours ? TEXT_MUTED : ACCENT_GREEN }),
+            exportEnCours ? "Génération…" : "Exporter vers Excel"),
         React.createElement("div", { style: { fontSize: 12, marginBottom: 8, color: TEXT_MUTED } }, currentLabel),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 } },
             React.createElement(KpiCard, { label: "Chiffre d'affaires", value: fmt(stats.ca), color: GOLD }),

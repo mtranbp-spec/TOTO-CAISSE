@@ -889,8 +889,41 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
     const video = useRef(null);
     const lecteur = useRef(null);
     const dernier = useRef({ code: "", t: 0 });
+    const audio = useRef(null);
     const [etat, setEtat] = useState("chargement");
     const [erreur, setErreur] = useState(null);
+    const [flash, setFlash] = useState(false);
+    // Le son est fabriqué à la volée : pas de fichier à télécharger, et pas de
+    // délai au premier bip. Le contexte audio est créé à l'ouverture, geste
+    // utilisateur sans lequel iOS refuserait de jouer quoi que ce soit.
+    function bip(reussi) {
+        try {
+            if (!audio.current)
+                audio.current = new (window.AudioContext || window.webkitAudioContext)();
+            const ctx = audio.current;
+            if (ctx.state === "suspended")
+                ctx.resume();
+            const jouer = (freq, debut, duree) => {
+                const o = ctx.createOscillator(), g = ctx.createGain();
+                o.type = "square";
+                o.frequency.value = freq;
+                g.gain.setValueAtTime(0.0001, ctx.currentTime + debut);
+                g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + debut + 0.01);
+                g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + debut + duree);
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.start(ctx.currentTime + debut);
+                o.stop(ctx.currentTime + debut + duree + 0.02);
+            };
+            if (reussi)
+                jouer(1180, 0, 0.11);
+            else {
+                jouer(320, 0, 0.13);
+                jouer(240, 0.16, 0.18);
+            }
+        }
+        catch (e) { }
+    }
     useEffect(() => {
         let vivant = true;
         chargerZXing()
@@ -917,9 +950,17 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
                     if (code === dernier.current.code && now - dernier.current.t < 2000)
                         return;
                     dernier.current = { code, t: now };
+                    const reconnu = onCode(code);
+                    setFlash(true);
+                    setTimeout(() => setFlash(false), 180);
+                    bip(reconnu);
                     if (navigator.vibrate)
-                        navigator.vibrate(60);
-                    onCode(code);
+                        navigator.vibrate(reconnu ? 60 : [40, 60, 40]);
+                    // Article reconnu : on referme, le vendeur revient au ticket
+                    // sans avoir à toucher l'écran. Un code inconnu laisse la
+                    // caméra ouverte pour réessayer.
+                    if (reconnu)
+                        setTimeout(onFermer, 320);
                 };
                 const contraintes = { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } } };
                 const demarrer = r.decodeFromConstraints
@@ -954,6 +995,11 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
                 v.srcObject.getTracks().forEach((t) => t.stop());
                 v.srcObject = null;
             }
+            try {
+                if (audio.current)
+                    audio.current.close();
+            }
+            catch (e) { }
         };
     }, []);
     useEffect(() => {
@@ -967,6 +1013,7 @@ function ScannerCamera({ onCode, onFermer, showToast }) {
         React.createElement("div", { style: { position: "absolute", left: "8%", right: "8%", top: "34%", height: "22%", border: `2px solid ${ACCENT_GREEN}`, borderRadius: 12, boxShadow: "0 0 0 9999px rgba(0,0,0,0.35)", pointerEvents: "none" } }),
         React.createElement("div", { style: { position: "absolute", top: "calc(14px + env(safe-area-inset-top))", left: 0, right: 0, textAlign: "center", color: "#fff", fontSize: 13, textShadow: "0 1px 3px rgba(0,0,0,0.8)", pointerEvents: "none" } },
             etat === "chargement" ? "Préparation de la caméra…" : etat === "actif" ? "Présente le code-barres dans le cadre" : ""),
+        React.createElement("div", { style: { position: "absolute", inset: 0, background: "#fff", opacity: flash ? 0.85 : 0, transition: flash ? "none" : "opacity 220ms ease", pointerEvents: "none" } }),
         erreur && React.createElement("div", { style: { position: "absolute", top: "45%", left: 20, right: 20, padding: 16, borderRadius: 12, background: PANEL, border: `1px solid ${LINE}`, color: TEXT, fontSize: 13, textAlign: "center" } }, erreur),
         React.createElement("button", { onClick: onFermer, className: "font-display", style: { position: "absolute", bottom: "calc(24px + env(safe-area-inset-bottom))", left: 24, right: 24, padding: "15px 0", borderRadius: 999, fontSize: 15, fontWeight: 600, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }, "Terminer"));
 }
@@ -1364,15 +1411,18 @@ function App() {
                 clearTimeout(minuteur);
         };
     }, [view, editing, libreTicket, factureEditee, nouveauVendeur, products]);
+    // Renvoie true si le code correspond à un produit : le scanner par caméra
+    // s'en sert pour décider s'il se ferme ou s'il attend un autre essai.
     function scanner(code) {
         const propre = String(code).replace(/\s/g, "");
         const p = products.find((x) => x.ean && String(x.ean).replace(/\s/g, "") === propre);
         if (!p) {
             showToast("Code inconnu : " + propre);
-            return;
+            return false;
         }
         addToCart(p);
         showToast(p.name + " ajouté");
+        return true;
     }
     function ajouterLibreAuTicket(nom, prix, taux) {
         const pv = parseFloat(String(prix).replace(",", "."));

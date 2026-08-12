@@ -270,6 +270,9 @@ const Icon = {
     Doc: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
         React.createElement("path", { d: "M14 2v6h6M8 13h8M8 17h5", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Camera: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
+        React.createElement("circle", { cx: "12", cy: "13", r: "4", stroke: p.color || "#fff", strokeWidth: "2" })),
     Move: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Pencil: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
@@ -863,6 +866,110 @@ function TirerPourRafraichir() {
             React.createElement("path", { d: "M21 12a9 9 0 1 1-3.5-7.1", stroke: TEXT, strokeWidth: "2.2", strokeLinecap: "round" }),
             React.createElement("path", { d: "M21 3v6h-6", stroke: TEXT, strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round" })));
 }
+/* ---------- Scan par l'appareil photo ----------
+   Safari n'a pas l'API de lecture de codes-barres du navigateur : on charge
+   une bibliothèque. Elle pèse 328 ko, donc uniquement à la première ouverture
+   du scanner, pas au démarrage de la caisse. */
+let zxingCharge = null;
+function chargerZXing() {
+    if (zxingCharge)
+        return zxingCharge;
+    zxingCharge = new Promise((res, rej) => {
+        if (window.ZXing)
+            return res(window.ZXing);
+        const s = document.createElement("script");
+        s.src = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js";
+        s.onload = () => (window.ZXing ? res(window.ZXing) : rej(new Error("bibliothèque illisible")));
+        s.onerror = () => rej(new Error("téléchargement impossible"));
+        document.head.appendChild(s);
+    });
+    return zxingCharge;
+}
+function ScannerCamera({ onCode, onFermer, showToast }) {
+    const video = useRef(null);
+    const lecteur = useRef(null);
+    const dernier = useRef({ code: "", t: 0 });
+    const [etat, setEtat] = useState("chargement");
+    const [erreur, setErreur] = useState(null);
+    useEffect(() => {
+        let vivant = true;
+        chargerZXing()
+            .then((ZXing) => {
+                if (!vivant)
+                    return;
+                const hints = new Map();
+                // On se limite aux codes des produits du commerce : la lecture
+                // est nettement plus rapide et se trompe moins.
+                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                    ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+                    ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+                    ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+                ]);
+                const r = new ZXing.BrowserMultiFormatReader(hints, 250);
+                lecteur.current = r;
+                const surResultat = (result, err) => {
+                    if (!result)
+                        return;
+                    const code = String(result.getText() || "").replace(/\s/g, "");
+                    const now = Date.now();
+                    // Un code reste dans le champ de la caméra plusieurs images
+                    // d'affilée : sans ce verrou, il s'ajouterait en boucle.
+                    if (code === dernier.current.code && now - dernier.current.t < 2000)
+                        return;
+                    dernier.current = { code, t: now };
+                    if (navigator.vibrate)
+                        navigator.vibrate(60);
+                    onCode(code);
+                };
+                const contraintes = { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } } };
+                const demarrer = r.decodeFromConstraints
+                    ? r.decodeFromConstraints(contraintes, video.current, surResultat)
+                    : r.decodeFromVideoDevice(null, video.current, surResultat);
+                Promise.resolve(demarrer)
+                    .then(() => { if (vivant) setEtat("actif"); })
+                    .catch((e) => {
+                        if (!vivant)
+                            return;
+                        const nom = e && e.name ? e.name : "";
+                        setErreur(nom === "NotAllowedError"
+                            ? "Accès à la caméra refusé. Autorise-le dans les réglages du navigateur."
+                            : nom === "NotFoundError"
+                                ? "Aucune caméra détectée sur cet appareil."
+                                : "Caméra indisponible : " + (e.message || nom));
+                        setEtat("erreur");
+                    });
+            })
+            .catch((e) => { if (vivant) { setErreur("Chargement du lecteur impossible : " + e.message); setEtat("erreur"); } });
+        return () => {
+            vivant = false;
+            try {
+                if (lecteur.current)
+                    lecteur.current.reset();
+            }
+            catch (e) { }
+            // Ceinture et bretelles : on éteint explicitement la caméra, sinon
+            // le voyant peut rester allumé sur certains téléphones.
+            const v = video.current;
+            if (v && v.srcObject) {
+                v.srcObject.getTracks().forEach((t) => t.stop());
+                v.srcObject = null;
+            }
+        };
+    }, []);
+    useEffect(() => {
+        function onKey(e) { if (e.key === "Escape") onFermer(); }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [onFermer]);
+    return React.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 90, background: "#000", display: "flex", flexDirection: "column" } },
+        React.createElement("video", { ref: video, autoPlay: true, muted: true, playsInline: true, style: { flex: 1, width: "100%", objectFit: "cover" } }),
+        // Cadre de visée : purement indicatif, la lecture se fait sur toute l'image.
+        React.createElement("div", { style: { position: "absolute", left: "8%", right: "8%", top: "34%", height: "22%", border: `2px solid ${ACCENT_GREEN}`, borderRadius: 12, boxShadow: "0 0 0 9999px rgba(0,0,0,0.35)", pointerEvents: "none" } }),
+        React.createElement("div", { style: { position: "absolute", top: "calc(14px + env(safe-area-inset-top))", left: 0, right: 0, textAlign: "center", color: "#fff", fontSize: 13, textShadow: "0 1px 3px rgba(0,0,0,0.8)", pointerEvents: "none" } },
+            etat === "chargement" ? "Préparation de la caméra…" : etat === "actif" ? "Présente le code-barres dans le cadre" : ""),
+        erreur && React.createElement("div", { style: { position: "absolute", top: "45%", left: 20, right: 20, padding: 16, borderRadius: 12, background: PANEL, border: `1px solid ${LINE}`, color: TEXT, fontSize: 13, textAlign: "center" } }, erreur),
+        React.createElement("button", { onClick: onFermer, className: "font-display", style: { position: "absolute", bottom: "calc(24px + env(safe-area-inset-bottom))", left: 24, right: 24, padding: "15px 0", borderRadius: 999, fontSize: 15, fontWeight: 600, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }, "Terminer"));
+}
 /* ---------- App ---------- */
 function App() {
     const [products, setProducts] = useState(DEFAULT_PRODUCTS);
@@ -888,6 +995,7 @@ function App() {
     const [libreTicket, setLibreTicket] = useState(null);
     const [factureEditee, setFactureEditee] = useState(null);
     const [prixEnEdition, setPrixEnEdition] = useState(null);
+    const [camera, setCamera] = useState(false);
     const toastTimer = useRef(null);
     useEffect(() => {
         const db = getDb();
@@ -1415,6 +1523,9 @@ function App() {
                         gridStyle: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
                         renderItem: (it, rangement) => React.createElement(CategoryTab, { label: it.id, active: activeCategory === it.id, color: colorOf(it.id), onClick: () => { if (!rangement) setActiveCategory(it.id); } }),
                     }),
+                    React.createElement("button", { onClick: () => setCamera(true), title: "Scanner avec l'appareil photo", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
+                        React.createElement(Icon.Camera, { size: 14, color: TEXT_MUTED }),
+                        "Scanner"),
                     React.createElement(ReorderButton, { active: reorderPos, onClick: () => setReorderPos((v) => !v) })),
                 // En vue « Toutes », on empile une section par catégorie plutôt
                 // qu'une grille unique : en plein service, l'intertitre coloré
@@ -1494,6 +1605,7 @@ function App() {
                         React.createElement("div", { style: { display: "flex", gap: 6 } },
                             React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
                             cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
+        camera && React.createElement(ScannerCamera, { showToast: showToast, onFermer: () => setCamera(false), onCode: (code) => scanner(code) }),
         nouveauVendeur !== null && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
             React.createElement("div", { style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Nouveau vendeur"),

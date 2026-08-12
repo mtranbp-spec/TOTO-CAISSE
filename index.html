@@ -1209,8 +1209,18 @@ function App() {
     useEffect(() => {
         if (view !== "pos" || editing || libreTicket || factureEditee || nouveauVendeur !== null)
             return;
-        let tampon = "", debut = 0, derniere = 0;
-        const LONGUEUR_MINI = 6, DUREE_MAXI = 1200, PAUSE = 400;
+        let tampon = "", debut = 0, derniere = 0, minuteur = null;
+        const LONGUEUR_MINI = 6, DUREE_MAXI = 1200, PAUSE = 400, REPOS = 160;
+        function valider() {
+            const code = tampon;
+            tampon = "";
+            if (minuteur) {
+                clearTimeout(minuteur);
+                minuteur = null;
+            }
+            if (code.length >= LONGUEUR_MINI && Date.now() - debut <= DUREE_MAXI + REPOS)
+                scanner(code);
+        }
         function onKey(e) {
             const c = e.target;
             // Si un champ a le focus, la douchette y écrit : on ne s'en mêle pas.
@@ -1218,13 +1228,9 @@ function App() {
                 return;
             const t = Date.now();
             if (e.key === "Enter") {
-                const duree = t - debut;
-                const code = tampon;
-                tampon = "";
-                if (code.length >= LONGUEUR_MINI && duree <= DUREE_MAXI) {
+                if (tampon.length >= LONGUEUR_MINI)
                     e.preventDefault();
-                    scanner(code);
-                }
+                valider();
                 return;
             }
             if (e.key.length !== 1)
@@ -1235,9 +1241,20 @@ function App() {
             }
             tampon += e.key;
             derniere = t;
+            // Beaucoup de douchettes n'envoient pas Entrée tant qu'on ne les a
+            // pas configurées pour. On valide donc aussi après une courte
+            // pause, ce qui les rend utilisables telles qu'elles sortent du
+            // carton.
+            if (minuteur)
+                clearTimeout(minuteur);
+            minuteur = setTimeout(valider, REPOS);
         }
         window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
+        return () => {
+            window.removeEventListener("keydown", onKey);
+            if (minuteur)
+                clearTimeout(minuteur);
+        };
     }, [view, editing, libreTicket, factureEditee, nouveauVendeur, products]);
     function scanner(code) {
         const propre = String(code).replace(/\s/g, "");

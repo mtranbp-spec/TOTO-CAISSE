@@ -874,7 +874,8 @@ function App() {
     const [statsPeriod, setStatsPeriod] = useState("jour");
     const [toast, setToast] = useState(null);
     const [editing, setEditing] = useState(null);
-    const [form, setForm] = useState({ name: "", price: "", cost: "", category: "", tgc: 0 });
+    const [form, setForm] = useState({ name: "", price: "", cost: "", category: "", tgc: 0, ean: "" });
+    const [formError, setFormError] = useState(null);
     const [catDocs, setCatDocs] = useState([]);
     const [catsLoaded, setCatsLoaded] = useState(false);
     const [reorderPos, setReorderPos] = useState(false);
@@ -1202,6 +1203,52 @@ function App() {
             return [...prev, { id: product.id, name: product.name, price: product.price, tgc: product.tgc || 0, qty: 1 }];
         });
     }
+    // Une douchette USB ou Bluetooth se comporte comme un clavier : elle tape
+    // le code puis envoie Entrée, mais bien plus vite qu'un humain. C'est cette
+    // vitesse qui permet de la distinguer d'une saisie au clavier.
+    useEffect(() => {
+        if (view !== "pos" || editing || libreTicket || factureEditee || nouveauVendeur !== null)
+            return;
+        let tampon = "", debut = 0, derniere = 0;
+        const LONGUEUR_MINI = 6, DUREE_MAXI = 1200, PAUSE = 400;
+        function onKey(e) {
+            const c = e.target;
+            // Si un champ a le focus, la douchette y écrit : on ne s'en mêle pas.
+            if (c && c.closest && c.closest("input, textarea, select"))
+                return;
+            const t = Date.now();
+            if (e.key === "Enter") {
+                const duree = t - debut;
+                const code = tampon;
+                tampon = "";
+                if (code.length >= LONGUEUR_MINI && duree <= DUREE_MAXI) {
+                    e.preventDefault();
+                    scanner(code);
+                }
+                return;
+            }
+            if (e.key.length !== 1)
+                return;
+            if (t - derniere > PAUSE || !tampon) {
+                tampon = "";
+                debut = t;
+            }
+            tampon += e.key;
+            derniere = t;
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [view, editing, libreTicket, factureEditee, nouveauVendeur, products]);
+    function scanner(code) {
+        const propre = String(code).replace(/\s/g, "");
+        const p = products.find((x) => x.ean && String(x.ean).replace(/\s/g, "") === propre);
+        if (!p) {
+            showToast("Code inconnu : " + propre);
+            return;
+        }
+        addToCart(p);
+        showToast(p.name + " ajouté");
+    }
     function ajouterLibreAuTicket(nom, prix, taux) {
         const pv = parseFloat(String(prix).replace(",", "."));
         if (!String(nom).trim() || isNaN(pv) || pv < 0) {
@@ -1272,8 +1319,8 @@ function App() {
             lignes: (v.items || []).map((it) => ({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })),
         };
     }
-    function openNewProduct() { setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture", tgc: 0 }); setEditing("new"); }
-    function openEditProduct(p) { setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category, tgc: p.tgc || 0 }); setEditing(p.id); }
+    function openNewProduct() { setFormError(null); setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture", tgc: 0, ean: "" }); setEditing("new"); }
+    function openEditProduct(p) { setFormError(null); setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category, tgc: p.tgc || 0, ean: p.ean || "" }); setEditing(p.id); }
     function submitProductForm() {
         const priceNum = parseFloat(String(form.price).replace(",", "."));
         const costNum = parseFloat(String(form.cost).replace(",", ".")) || 0;
@@ -1281,8 +1328,19 @@ function App() {
             showToast("Vérifie le nom, le prix et la catégorie.");
             return;
         }
+        // Un code-barres ne peut désigner qu'un seul produit : sinon le scan
+        // deviendrait ambigu au moment de l'encaissement.
+        const eanPropre = String(form.ean || "").replace(/\s/g, "");
+        if (eanPropre) {
+            const occupe = products.find((p) => p.ean && String(p.ean).replace(/\s/g, "") === eanPropre && p.id !== editing);
+            if (occupe) {
+                setFormError("Ce code-barres est déjà utilisé par « " + occupe.name + " ».");
+                return;
+            }
+        }
+        setFormError(null);
         const db = getDb();
-        const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim(), tgc: Number(form.tgc) || 0 };
+        const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim(), tgc: Number(form.tgc) || 0, ean: eanPropre };
         if (editing === "new") {
             const id = "p" + Date.now();
             if (db)
@@ -1329,7 +1387,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -1529,7 +1587,7 @@ function StatsView({ period, setPeriod, currentLabel, trend, stats, ventes, show
                 React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(detail), showToast, "facture"), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer la facture"),
                 React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(detail), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer par mail")))));
 }
-function ManageView({ products, categories, catDocs, editing, form, setForm, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
+function ManageView({ products, categories, catDocs, editing, form, setForm, formError, setFormError, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
     const [activeCategory, setActiveCategory] = useState("Toutes");
     const [catForm, setCatForm] = useState(null); // { id, name, color } — id null = création
     const [catBusy, setCatBusy] = useState(false);
@@ -1702,6 +1760,10 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, ope
                     return React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 8 } },
                         "Prix TTC " + fmt(pv) + " → " + fmt(htDepuisTTC(pv, tx)) + " HT + " + fmt(tgcDepuisTTC(pv, tx)) + " de TGC");
                 })(),
+                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "Code-barres (EAN)"),
+                React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: e.target.value }); }, style: { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, inputMode: "numeric", placeholder: "Clique ici puis scanne l'article" }),
+                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 4 } }, "Laisse vide pour un plat maison, qui n'a pas de code."),
+                formError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 8 } }, formError),
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
                 editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit")))),
         catForm && (React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.5)" } },

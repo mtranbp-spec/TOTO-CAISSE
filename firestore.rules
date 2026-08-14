@@ -38,6 +38,10 @@ service cloud.firestore {
       allow read, write: if estCaisse();
     }
 
+    match /achats/{achatId} {
+      allow read, write: if estCaisse();
+    }
+
     // Tout le reste est refusé par défaut.
   }
 }

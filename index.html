@@ -1780,11 +1780,13 @@ function App() {
             return Promise.reject(new Error("Pas de connexion."));
         return db.collection("quotes").doc(id).delete();
     }
-    function saveAchat(a) {
+    function saveAchat(a, id) {
         const db = getDb();
         if (!db)
             return Promise.reject(new Error("Pas de connexion."));
-        return db.collection("achats").doc("a" + Date.now()).set(a);
+        // Un identifiant fourni signifie une correction, pas une nouvelle
+        // facture : sans ça, modifier créerait un doublon.
+        return db.collection("achats").doc(id || ("a" + Date.now())).set(a);
     }
     function deleteAchat(id) {
         const db = getDb();
@@ -3161,6 +3163,20 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     }, [visibles]);
     const champ = { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
     const label = { fontSize: 12, color: TEXT_MUTED };
+    function modifier(a) {
+        setForm({
+            id: a.id,
+            fournisseur: a.fournisseur || "",
+            dateKey: a.dateKey || todayKey(),
+            numero: a.numero || "",
+            ht: String(a.ht || ""),
+            tgc: String(a.tgc || ""),
+            ttc: String(a.ttc || ""),
+            ventilation: ventilationDe(a).map((l) => ({ taux: l.taux, ht: String(l.ht), tgc: String(l.tgc) })),
+            note: a.note || "",
+            photo: a.photo || "",
+        });
+    }
     function nouveau() {
         setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], note: "", photo: "" });
     }
@@ -3298,8 +3314,8 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             photo: form.photo || "",
             createdAt: new Date().toISOString(),
         };
-        saveAchat(a)
-            .then(() => { showToast("Achat enregistré"); setForm(null); })
+        saveAchat(a, form.id)
+            .then(() => { showToast(form.id ? "Facture corrigée" : "Achat enregistré"); setForm(null); })
             .catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible")));
     }
     return (React.createElement("div", { style: { padding: 20, maxWidth: 820, margin: "0 auto" } },
@@ -3350,7 +3366,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                         ? React.createElement("button", { onClick: () => setApercuPhoto(a), title: "Voir la facture", style: { width: 34, height: 34, borderRadius: 8, flexShrink: 0, padding: 0, overflow: "hidden", border: `1px solid ${LINE}`, background: BG } },
                             React.createElement("img", { src: a.photo, alt: "", style: { width: "100%", height: "100%", objectFit: "cover" } }))
                         : React.createElement("div", { style: { width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: BG, border: `1px solid ${LINE}` } }),
-                    React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+                    React.createElement("button", { onClick: () => modifier(a), title: "Ouvrir pour vérifier ou corriger", style: { flex: 1, minWidth: 0, textAlign: "left", padding: 0, background: "transparent" } },
                         React.createElement("div", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.fournisseur),
                         React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 1 } }, [shortDayLabel(a.dateKey), a.numero || null, "HT " + fmt(a.ht || 0)].filter(Boolean).join(" · ")),
                         // Le détail par taux à même la ligne : c'est l'information
@@ -3384,9 +3400,10 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         form && React.createElement("div", { onClick: () => setForm(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65, padding: 16, background: "rgba(0,0,0,0.55)" } },
             React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 400, maxHeight: "88vh", overflowY: "auto", borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, "Facture d'achat"),
+                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, form.id ? "Vérifier la facture" : "Facture d'achat"),
                     React.createElement("button", { onClick: () => setForm(null), style: { background: "transparent" } }, React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
-                form.photo && React.createElement("img", { src: form.photo, alt: "", style: { width: "100%", maxHeight: 170, objectFit: "cover", borderRadius: 10, marginBottom: 12, border: `1px solid ${LINE}` } }),
+                form.photo && React.createElement("button", { onClick: () => setApercuPhoto({ photo: form.photo }), title: "Agrandir", style: { display: "block", width: "100%", padding: 0, marginBottom: 12, borderRadius: 10, overflow: "hidden", border: `1px solid ${LINE}`, background: BG } },
+                    React.createElement("img", { src: form.photo, alt: "", style: { width: "100%", maxHeight: 190, objectFit: "contain" } })),
                 React.createElement("label", { style: label }, "Fournisseur"),
                 React.createElement("input", { value: form.fournisseur, list: "fournisseurs", onChange: (e) => setForm({ ...form, fournisseur: e.target.value }), style: champ, placeholder: "Ex : Société Calédonienne de Boissons" }),
                 React.createElement("datalist", { id: "fournisseurs" }, fournisseursConnus.map((f) => React.createElement("option", { key: f, value: f }))),
@@ -3422,7 +3439,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: -4, marginBottom: 12 } }, "Une ligne par taux figurant sur la facture. Les totaux ci-dessus se recalculent."),
                 React.createElement("label", { style: label }, "Note"),
                 React.createElement("input", { value: form.note, onChange: (e) => setForm({ ...form, note: e.target.value }), style: champ, placeholder: "Facultatif" }),
-                React.createElement("button", { onClick: enregistrer, className: "font-display", style: { width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer l'achat")))));
+                React.createElement("button", { onClick: enregistrer, className: "font-display", style: { width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, form.id ? "Enregistrer les corrections" : "Enregistrer l'achat")))));
 }
 /* ---------- Écran de connexion (PIN partagé) ---------- */
 function LoginView() {

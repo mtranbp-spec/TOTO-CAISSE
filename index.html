@@ -1121,6 +1121,35 @@ function analyserFacture(texte) {
     }
     return { fournisseur: fournisseur.slice(0, 60), ht, tgc, ttc };
 }
+// Le Worker Cloudflare garde la clé Gemini : l'appli ne lui envoie qu'une
+// photo et reçoit les champs déjà structurés.
+const URL_ANALYSE = "https://jolly-morning-19b6.mtranbp.workers.dev/";
+async function analyserParIA(fichier, surAvancement) {
+    surAvancement("Préparation de l'image…", 0.12);
+    // 1500 px suffisent largement au modèle et limitent le temps d'envoi
+    // depuis une connexion mobile.
+    const img = await compresserImage(fichier, 1500, 0.82);
+    surAvancement("Analyse de la facture…", 0.35);
+    const r = await fetch(URL_ANALYSE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: img.url.split(",")[1], mime: "image/jpeg" }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.erreur)
+        throw new Error(d.erreur || ("erreur " + r.status));
+    surAvancement("Analyse terminée", 0.98);
+    return {
+        fournisseur: d.fournisseur || "",
+        date: d.date || "",
+        numero: d.numero || "",
+        ht: typeof d.ht === "number" && d.ht > 0 ? d.ht : null,
+        tgc: typeof d.tgc === "number" && d.tgc > 0 ? d.tgc : null,
+        ttc: typeof d.ttc === "number" && d.ttc > 0 ? d.ttc : null,
+        confiance: d.confiance,
+        source: "ia",
+    };
+}
 async function lireFacture(fichier, surAvancement) {
     const T = await chargerTesseract();
     surAvancement("Préparation du moteur…", 0.05);
@@ -2860,24 +2889,46 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             showToast("⚠️ " + err.message);
             return;
         }
-        const base = form || { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", note: "", photo: "" };
+        const base = { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", note: "", photo: "" };
         setForm({ ...base, photo: img.url });
+        // On tente l'analyse en ligne, nettement plus fiable. Si le réseau ou
+        // le service manque, on retombe sur la lecture locale plutôt que de
+        // laisser l'utilisateur devant un formulaire vide.
+        let lu = null, secours = false;
         try {
-            const lu = await lireFacture(f, (texte, part) => setAvancement({ texte, part }));
-            setForm((p) => ({
-                ...(p || base),
-                fournisseur: p && p.fournisseur ? p.fournisseur : (lu.fournisseur || ""),
-                ht: lu.ht !== null ? String(lu.ht) : (p ? p.ht : ""),
-                tgc: lu.tgc !== null ? String(lu.tgc) : (p ? p.tgc : ""),
-                ttc: lu.ttc !== null ? String(lu.ttc) : (p ? p.ttc : ""),
-            }));
-            const trouves = [lu.ht, lu.tgc, lu.ttc].filter((x) => x !== null).length;
-            showToast(trouves === 0 ? "Aucun montant reconnu — saisis-les à la main" : trouves + " montant" + (trouves > 1 ? "s" : "") + " reconnu" + (trouves > 1 ? "s" : "") + " — vérifie-les");
+            lu = await analyserParIA(f, (texte, part) => setAvancement({ texte, part }));
         }
-        catch (err) {
-            showToast("⚠️ Lecture impossible : " + err.message);
+        catch (err1) {
+            secours = true;
+            try {
+                setAvancement({ texte: "Service en ligne indisponible — lecture locale…", part: 0.1 });
+                lu = await lireFacture(f, (texte, part) => setAvancement({ texte, part }));
+            }
+            catch (err2) {
+                setAvancement(null);
+                showToast("⚠️ Lecture impossible : " + err2.message);
+                return;
+            }
         }
+        setForm((p) => ({
+            ...(p || base),
+            fournisseur: lu.fournisseur || (p ? p.fournisseur : ""),
+            dateKey: /^\d{4}-\d{2}-\d{2}$/.test(lu.date || "") ? lu.date : (p ? p.dateKey : todayKey()),
+            numero: lu.numero || (p ? p.numero : ""),
+            ht: lu.ht !== null ? String(lu.ht) : (p ? p.ht : ""),
+            tgc: lu.tgc !== null ? String(lu.tgc) : (p ? p.tgc : ""),
+            ttc: lu.ttc !== null ? String(lu.ttc) : (p ? p.ttc : ""),
+        }));
+        const trouves = [lu.ht, lu.tgc, lu.ttc].filter((x) => x !== null && x !== undefined).length;
         setAvancement(null);
+        if (trouves === 0)
+            showToast("Aucun montant reconnu — saisis-les à la main");
+        else if (secours)
+            showToast("Lecture locale : vérifie bien les montants");
+        else if (typeof lu.confiance === "number" && lu.confiance < 0.8)
+            showToast("Lecture incertaine — vérifie les montants");
+        else
+            showToast("Facture lue — vérifie et valide");
     }
     // Le troisième montant se déduit des deux autres : on évite une saisie
     // et surtout une incohérence.

@@ -1,4 +1,4 @@
-const CACHE_NAME = "toto-caisse-v12";
+const CACHE_NAME = "toto-caisse-v13";
 const ASSETS = [
   "./manifest.json",
   "./icon.jpg",

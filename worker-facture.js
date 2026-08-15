@@ -21,7 +21,7 @@ const ORIGINES_AUTORISEES = [
 // de tomber en panne le jour d'une dépréciation.
 // Numéro de version renvoyé à chaque réponse : il suffit de le lire pour
 // savoir quelle version tourne réellement sur Cloudflare.
-const VERSION = "5-categories";
+const VERSION = "6-quota";
 
 const MODELES = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-2.5-flash"];
 
@@ -161,8 +161,29 @@ export default {
         break;
       }
       dernierDetail = (await r.text()).slice(0, 200);
-      // 404 ou 400 : modèle inconnu ou retiré, on tente le suivant. Toute
-      // autre erreur (quota, clé invalide) se répéterait à l'identique.
+      // 429 : quota momentanément dépassé. On patiente puis on réessaie une
+      // fois — un pic de quelques secondes ne doit pas faire échouer un lot.
+      if (r.status === 429) {
+        await new Promise((res) => setTimeout(res, 6000));
+        let r2;
+        try {
+          r2 = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: charge });
+        } catch (e) {
+          r2 = null;
+        }
+        if (r2 && r2.ok) {
+          reponse = r2;
+          modeleUtilise = modele;
+          break;
+        }
+        return new Response(JSON.stringify({
+          erreur: "Quota Gemini atteint",
+          quota: true,
+          conseil: "Le palier gratuit autorise 15 requêtes par minute et 1 500 par jour. Attends une minute, ou réduis la taille du lot.",
+          statut: 429,
+        }), { status: 429, headers: enTetes(permise) });
+      }
+      // 404 ou 400 : modèle inconnu ou retiré, on tente le suivant.
       if (r.status !== 404 && r.status !== 400)
         return new Response(JSON.stringify({ erreur: "Analyse refusée", statut: r.status, detail: dernierDetail }), { status: 502, headers: enTetes(permise) });
     }

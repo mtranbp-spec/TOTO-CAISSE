@@ -1170,8 +1170,14 @@ async function analyserParIA(fichier, surAvancement) {
         body: JSON.stringify({ image: img.url.split(",")[1], mime: "image/jpeg" }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok || d.erreur)
-        throw new Error(d.erreur || ("erreur " + r.status));
+    if (!r.ok || d.erreur) {
+        const e = new Error(d.erreur || ("erreur " + r.status));
+        // On distingue le quota du reste : ce n'est pas une panne, c'est une
+        // limite qui se lève d'elle-même. Le message doit le dire.
+        e.quota = !!d.quota || r.status === 429;
+        e.conseil = d.conseil || "";
+        throw e;
+    }
     surAvancement("Analyse terminée", 0.98);
     return {
         fournisseur: d.fournisseur || "",
@@ -3285,12 +3291,13 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         catch (err) {
             return null;
         }
-        let lu = null, secours = false;
+        let lu = null, secours = false, motif = "";
         try {
             lu = await analyserParIA(f, avancer);
         }
         catch (err1) {
             secours = true;
+            motif = err1.quota ? "quota" : "reseau";
             try {
                 lu = await lireFacture(f, avancer);
             }
@@ -3316,6 +3323,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             // Marque les fiches à revoir : lecture de secours, confiance faible
             // ou montant manquant. Elles ressortent en jaune dans la liste.
             aVerifier: secours || (typeof lu.confiance === "number" && lu.confiance < 0.8) || !(Number(lu.ttc) > 0),
+            motif,
         };
     }
     async function surPhoto(e) {
@@ -3338,19 +3346,29 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 ventilation: fiche.ventilation.map((l) => ({ taux: l.taux, ht: String(l.ht), tgc: String(l.tgc) })),
                 lignes: fiche.lignes, note: "", photo: fiche.photo,
             });
-            showToast(fiche.aVerifier ? "Lecture incertaine — vérifie les montants" : "Facture lue — vérifie et valide");
+            showToast(fiche.motif === "quota"
+                ? "⚠️ Quota IA atteint — lecture locale, vérifie tout"
+                : fiche.aVerifier ? "Lecture incertaine — vérifie les montants" : "Facture lue — vérifie et valide");
             return;
         }
         // Plusieurs photos : traitement à la chaîne et enregistrement direct.
         // Ouvrir une fiche par facture annulerait tout l'intérêt du lot.
-        let reussies = 0, aRevoir = 0, echecs = 0;
+        let reussies = 0, aRevoir = 0, echecs = 0, quotaAtteint = 0;
         for (let i = 0; i < fichiers.length; i++) {
             const n = i + 1;
+            // Le palier gratuit plafonne à 15 requêtes par minute : on espace
+            // les envois plutôt que de se faire refuser au bout de la dixième.
+            if (i > 0) {
+                setAvancement({ texte: "Pause avant la facture " + n + " sur " + fichiers.length + "…", part: i / fichiers.length });
+                await new Promise((r) => setTimeout(r, 4500));
+            }
             const fiche = await analyserUne(fichiers[i], (texte, part) => setAvancement({ texte: "Facture " + n + " sur " + fichiers.length + " — " + texte, part: (i + part) / fichiers.length }));
             if (!fiche) {
                 echecs++;
                 continue;
             }
+            if (fiche.motif === "quota")
+                quotaAtteint++;
             try {
                 await saveAchat(fiche);
                 reussies++;
@@ -3365,7 +3383,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         const bilan = [reussies + " enregistrée" + (reussies > 1 ? "s" : ""),
             aRevoir ? aRevoir + " à vérifier" : null,
             echecs ? echecs + " en échec" : null].filter(Boolean).join(" · ");
-        showToast(bilan);
+        showToast(quotaAtteint ? "⚠️ Quota IA atteint sur " + quotaAtteint + " facture" + (quotaAtteint > 1 ? "s" : "") + " — " + bilan : bilan);
     }
     // Les totaux découlent toujours de la ventilation : impossible d'avoir un
     // total qui ne corresponde pas au détail.

@@ -3199,9 +3199,10 @@ async function pdfAchats(liste, nomFichier, showToast) {
 }
 /* ---------- Onglet Achats ---------- */
 function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
-    // Une facture se photographie souvent des semaines après son émission :
-    // une fenêtre d'un an évite de croire qu'elle ne s'est pas enregistrée.
-    const [periode, setPeriode] = useState("max");
+    // Une comptabilité se tient par exercice et par mois, pas en fenêtres
+    // glissantes : on choisit une année, et éventuellement un mois.
+    const [annee, setAnnee] = useState(String(new Date().getFullYear()));
+    const [mois, setMois] = useState("");
     const [form, setForm] = useState(null);
     const [avancement, setAvancement] = useState(null);
     const [aSupprimer, setASupprimer] = useState(null);
@@ -3209,22 +3210,31 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     const [enregistrement, setEnregistrement] = useState(false);
     const fichier = useRef(null);
     const fournisseursConnus = useMemo(() => Array.from(new Set(achats.map((a) => a.fournisseur).filter(Boolean))).sort(), [achats]);
+    const anneesDisponibles = useMemo(() => {
+        const set = new Set(achats.map((a) => String(a.dateKey || "").slice(0, 4)).filter((x) => /^\d{4}$/.test(x)));
+        set.add(String(new Date().getFullYear()));
+        return Array.from(set).sort().reverse();
+    }, [achats]);
     const visibles = useMemo(() => {
-        const def = PERIODES.find((x) => x.cle === periode) || PERIODES[2];
-        const depuis = def.jours === null ? null : new Date(Date.now() - def.jours * 86400000);
         return achats
             .filter((a) => {
-                if (!depuis)
+                if (annee === "tout")
                     return true;
-                const d = a.dateKey ? new Date(a.dateKey + "T12:00:00") : null;
-                // Une date absente ou illisible ne doit jamais escamoter une
-                // facture : on la garde plutôt que de la perdre en silence.
-                if (!d || isNaN(d))
+                const dk = String(a.dateKey || "");
+                // Une facture sans date lisible reste visible : mieux vaut la
+                // voir à sa mauvaise place que la perdre.
+                if (!/^\d{4}-\d{2}/.test(dk))
                     return true;
-                return d >= depuis;
+                if (dk.slice(0, 4) !== annee)
+                    return false;
+                return !mois || dk.slice(5, 7) === mois;
             })
             .sort((a, b) => String(b.dateKey).localeCompare(String(a.dateKey)));
-    }, [achats, periode]);
+    }, [achats, annee, mois]);
+    const MOIS_FR = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+    const libellePeriode = annee === "tout"
+        ? "Tout l'historique"
+        : (mois ? MOIS_FR[Number(mois) - 1] + " " + annee : "Année " + annee);
     const totaux = useMemo(() => visibles.reduce((t, a) => ({
         ht: t.ht + (a.ht || 0), tgc: t.tgc + (a.tgc || 0), ttc: t.ttc + (a.ttc || 0),
     }), { ht: 0, tgc: 0, ttc: 0 }), [visibles]);
@@ -3510,12 +3520,22 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                     React.createElement("input", { ref: fichier, type: "file", accept: "image/*", multiple: true, onChange: surPhoto, style: { display: "none" } })),
                 React.createElement("button", { onClick: nouveau, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: ACCENT, color: "#fff" } },
                     React.createElement(Icon.Plus, { size: 14 }), "Saisir"))),
-        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 4 } }, PERIODES.map((opt) => React.createElement("button", { key: opt.cle, onClick: () => setPeriode(opt.cle), style: { flexShrink: 0, padding: "7px 13px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: periode === opt.cle ? ACCENT : PANEL, color: periode === opt.cle ? "#fff" : TEXT_MUTED, border: `1px solid ${periode === opt.cle ? ACCENT : LINE}` } }, opt.label))),
+        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
+            anneesDisponibles.map((an) => React.createElement("button", { key: an, onClick: () => setAnnee(an), style: { flexShrink: 0, padding: "7px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: annee === an ? ACCENT : PANEL, color: annee === an ? "#fff" : TEXT_MUTED, border: `1px solid ${annee === an ? ACCENT : LINE}` } }, an)),
+            React.createElement("button", { onClick: () => { setAnnee("tout"); setMois(""); }, style: { flexShrink: 0, padding: "7px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: annee === "tout" ? ACCENT : "transparent", color: annee === "tout" ? "#fff" : TEXT_MUTED, border: `1px ${annee === "tout" ? "solid" : "dashed"} ${annee === "tout" ? ACCENT : LINE}` } }, "Tout")),
+        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
+            React.createElement("button", { onClick: () => setMois(""), disabled: annee === "tout", style: { flexShrink: 0, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: !mois ? PANEL : "transparent", color: annee === "tout" ? LINE : (!mois ? TEXT : TEXT_MUTED), border: `1px solid ${!mois && annee !== "tout" ? TEXT_MUTED : LINE}` } }, "Toute l'année"),
+            MOIS_FR.map((nom, i) => {
+                const cle = String(i + 1).padStart(2, "0");
+                const actif = mois === cle && annee !== "tout";
+                return React.createElement("button", { key: cle, onClick: () => setMois(cle), disabled: annee === "tout", title: nom + " " + annee, style: { flexShrink: 0, padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: actif ? ACCENT_GREEN : "transparent", color: annee === "tout" ? LINE : (actif ? "#fff" : TEXT_MUTED), border: `1px solid ${actif ? ACCENT_GREEN : LINE}` } }, nom.slice(0, 3));
+            })),
+        React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 12 } }, libellePeriode + " — " + visibles.length + " facture" + (visibles.length > 1 ? "s" : "")),
         React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" } },
-            React.createElement("button", { onClick: () => pdfAchats(visibles, "TOTO-factures-achat-" + todayKey() + ".pdf", showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
+            React.createElement("button", { onClick: () => pdfAchats(visibles, "TOTO-factures-" + libellePeriode.replace(/[^\w]+/g, "-").toLowerCase() + ".pdf", showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
                 React.createElement(Icon.Doc, { size: 14, color: visibles.length ? ACCENT : TEXT_MUTED }),
                 "Toutes les factures en PDF"),
-            React.createElement("button", { onClick: () => exporterAchatsExcel(visibles, (PERIODES.find((x) => x.cle === periode) || {}).longLabel, showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
+            React.createElement("button", { onClick: () => exporterAchatsExcel(visibles, libellePeriode, showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
                 React.createElement(Icon.Export, { size: 14, color: visibles.length ? ACCENT_GREEN : TEXT_MUTED }),
                 "Exporter vers Excel")),
         parCategorie.length > 0 && React.createElement("div", { style: { borderRadius: 14, padding: 14, marginBottom: 12, background: PANEL, border: `1px solid ${LINE}` } },
@@ -3556,7 +3576,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                     achats.length > 0 && React.createElement("div", { style: { marginTop: 12 } },
                         React.createElement("div", { style: { fontSize: 12, color: GOLD, marginBottom: 10 } },
                             achats.length + " facture" + (achats.length > 1 ? "s" : "") + " enregistrée" + (achats.length > 1 ? "s" : "") + " en dehors de cette période"),
-                        React.createElement("button", { onClick: () => setPeriode("max"), style: { padding: "9px 16px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: ACCENT, color: "#fff" } }, "Tout afficher")))
+                        React.createElement("button", { onClick: () => { setAnnee("tout"); setMois(""); }, style: { padding: "9px 16px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: ACCENT, color: "#fff" } }, "Tout afficher")))
                 : visibles.map((a) => React.createElement("div", { key: a.id, style: { display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px", borderBottom: `1px solid ${LINE}` } },
                     a.photo
                         ? React.createElement("button", { onClick: () => setApercuPhoto(a), title: "Voir la facture", style: { width: 34, height: 34, borderRadius: 8, flexShrink: 0, padding: 0, overflow: "hidden", border: `1px solid ${LINE}`, background: BG } },
@@ -3580,7 +3600,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                     React.createElement("button", { onClick: () => setASupprimer(a), title: "Supprimer", style: { width: 30, height: 30, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: `1px solid ${LINE}` } },
                         React.createElement(Icon.Trash, { size: 13, color: "#E86A5C" })))),
             visibles.length > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: BG } },
-                React.createElement("span", { className: "font-display", style: { flex: 1, fontSize: 13, color: TEXT_MUTED } }, "TOTAL " + (PERIODES.find((x) => x.cle === periode) || {}).longLabel),
+                React.createElement("span", { className: "font-display", style: { flex: 1, fontSize: 13, color: TEXT_MUTED } }, "TOTAL — " + libellePeriode),
                 React.createElement("span", { className: "tabnum font-display", style: { fontSize: 18, color: GOLD } }, fmt(totaux.ttc)))),
         avancement && React.createElement("div", { style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 24, background: "rgba(0,0,0,0.6)" } },
             React.createElement("div", { style: { width: "100%", maxWidth: 320, borderRadius: 16, padding: 22, background: PANEL, border: `1px solid ${LINE}`, textAlign: "center" } },

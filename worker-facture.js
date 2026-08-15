@@ -29,16 +29,30 @@ Champs attendus :
   "fournisseur": string,   // raison sociale de l'émetteur, pas du client (le client est TOTO)
   "date": string,          // date de la facture au format AAAA-MM-JJ, "" si illisible
   "numero": string,        // numéro de facture, "" si absent
-  "ht": number,            // total hors taxe
-  "tgc": number,           // montant total de la TGC (la TVA locale calédonienne)
+  "ventilation": [         // UNE ENTRÉE PAR TAUX DE TGC présent sur la facture
+    { "taux": number,      // 0, 3, 6, 11 ou 22
+      "ht": number,        // base hors taxe soumise à ce taux
+      "tgc": number }      // montant de TGC pour ce taux
+  ],
+  "ht": number,            // total hors taxe, somme des bases
+  "tgc": number,           // total de TGC, somme des lignes
   "ttc": number,           // total toutes taxes comprises
   "confiance": number      // 0 à 1, ta confiance dans cette lecture
 }
 
 Règles :
 - Les montants sont en francs CFP, sans décimales le plus souvent. Renvoie des nombres, jamais de texte.
+- La ventilation est le champ le plus important : une facture mélange souvent
+  plusieurs taux (6 % sur l'alimentaire, 22 % sur les boissons sucrées). Cherche
+  le tableau récapitulatif de TVA/TGC, généralement en bas de la facture, et
+  rends une entrée par ligne de ce tableau.
+- Si un seul taux apparaît, la ventilation contient une seule entrée.
+- Si aucun tableau n'est lisible mais que tu as le HT et la TGC totaux, déduis
+  le taux (tgc / ht × 100) et arrondis au taux légal le plus proche parmi 0, 3,
+  6, 11, 22. Rends alors une entrée unique.
+- Vérifie la cohérence : pour chaque entrée, tgc doit valoir environ ht × taux / 100.
+  Et ht + tgc doit égaler ttc. Corrige le montant le moins lisible si besoin.
 - Si un montant est illisible, mets 0 plutôt que d'inventer.
-- Vérifie la cohérence : ht + tgc doit égaler ttc. Si ce n'est pas le cas, corrige le montant le moins lisible.
 - N'inclus aucun commentaire ni explication.`;
 
 function enTetes(origine) {
@@ -138,13 +152,42 @@ export default {
       return isNaN(n) ? 0 : Math.round(n * 100) / 100;
     };
 
+    const TAUX_LEGAUX = [0, 3, 6, 11, 22];
+    const tauxProche = (v) => TAUX_LEGAUX.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), 0);
+
+    // On assainit la ventilation : taux ramenés aux valeurs légales, entrées
+    // vides écartées, et fusion des doublons éventuels.
+    const brute = Array.isArray(extrait.ventilation) ? extrait.ventilation : [];
+    const parTaux = new Map();
+    brute.forEach((l) => {
+      const t = tauxProche(nombre(l && l.taux));
+      const ht = nombre(l && l.ht);
+      const tgc = nombre(l && l.tgc);
+      if (ht === 0 && tgc === 0) return;
+      const e = parTaux.get(t) || { taux: t, ht: 0, tgc: 0 };
+      e.ht += ht;
+      e.tgc += tgc;
+      parTaux.set(t, e);
+    });
+    let ventilation = Array.from(parTaux.values()).sort((a, b) => a.taux - b.taux);
+
+    const htTotal = nombre(extrait.ht);
+    const tgcTotal = nombre(extrait.tgc);
+    // Repli : sans tableau lisible, on déduit un taux unique des totaux.
+    if (!ventilation.length && htTotal > 0)
+      ventilation = [{ taux: tauxProche((tgcTotal / htTotal) * 100), ht: htTotal, tgc: tgcTotal }];
+
+    const sommeHt = ventilation.reduce((s, l) => s + l.ht, 0);
+    const sommeTgc = ventilation.reduce((s, l) => s + l.tgc, 0);
+
     return new Response(JSON.stringify({
       fournisseur: String(extrait.fournisseur || "").slice(0, 80),
       date: String(extrait.date || ""),
       numero: String(extrait.numero || "").slice(0, 40),
-      ht: nombre(extrait.ht),
-      tgc: nombre(extrait.tgc),
-      ttc: nombre(extrait.ttc),
+      ventilation,
+      ht: htTotal || Math.round(sommeHt * 100) / 100,
+      tgc: tgcTotal || Math.round(sommeTgc * 100) / 100,
+      ttc: nombre(extrait.ttc) || Math.round((sommeHt + sommeTgc) * 100) / 100,
       confiance: nombre(extrait.confiance),
       modele: modeleUtilise,
     }), { headers: enTetes(permise) });

@@ -981,6 +981,54 @@ function compresserImage(fichier, largeurMax, qualite) {
         fr.readAsDataURL(fichier);
     });
 }
+// Une photo de téléphone est un mauvais matériau brut : trop grande, colorée,
+// mal éclairée. On la ramène à une taille utile, en niveaux de gris, et on
+// étire le contraste pour détacher le texte du papier. C'est ce qui fait la
+// différence entre une lecture correcte et une bouillie de caractères.
+function preparerPourOcr(fichier, largeurMax) {
+    return new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onerror = () => rej(new Error("lecture du fichier impossible"));
+        fr.onload = () => {
+            const img = new Image();
+            img.onerror = () => rej(new Error("image illisible"));
+            img.onload = () => {
+                const ratio = Math.min(1, largeurMax / img.width);
+                const c = document.createElement("canvas");
+                c.width = Math.round(img.width * ratio);
+                c.height = Math.round(img.height * ratio);
+                const g = c.getContext("2d", { willReadFrequently: true });
+                g.drawImage(img, 0, 0, c.width, c.height);
+                const d = g.getImageData(0, 0, c.width, c.height);
+                const px = d.data;
+                // Premier passage : luminance, et repérage des extrêmes réels.
+                let mini = 255, maxi = 0;
+                for (let i = 0; i < px.length; i += 4) {
+                    const l = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
+                    px[i] = l;
+                    if (l < mini)
+                        mini = l;
+                    if (l > maxi)
+                        maxi = l;
+                }
+                // Second passage : on redéploie ces extrêmes sur toute l'échelle.
+                const ecart = Math.max(1, maxi - mini);
+                for (let i = 0; i < px.length; i += 4) {
+                    let v = ((px[i] - mini) * 255 / ecart) | 0;
+                    // Léger raidissement : le gris du papier vire au blanc,
+                    // l'encre pâle vire au noir.
+                    v = v < 110 ? Math.max(0, v - 30) : v > 165 ? Math.min(255, v + 30) : v;
+                    px[i] = px[i + 1] = px[i + 2] = v;
+                    px[i + 3] = 255;
+                }
+                g.putImageData(d, 0, 0);
+                res(c.toDataURL("image/png"));
+            };
+            img.src = fr.result;
+        };
+        fr.readAsDataURL(fichier);
+    });
+}
 // Convertit « 12 345,67 » ou « 12345.67 » en nombre.
 function nombreFr(t) {
     if (!t)
@@ -1006,53 +1054,68 @@ function dernierNombre(ligne) {
 }
 function analyserFacture(texte) {
     const lignes = String(texte || "").split("\n").map((l) => l.trim()).filter(Boolean);
-    const sansAccent = (t) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase();
+    const sansAccent = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
     let ht = null, tgc = null, ttc = null;
-    lignes.forEach((l) => {
+    // Le montant se trouve sur la ligne du libellé, ou juste en dessous quand
+    // la facture est présentée en colonnes.
+    function valeurPres(idx) {
+        const v = dernierNombre(lignes[idx]);
+        if (v !== null)
+            return v;
+        return idx + 1 < lignes.length ? dernierNombre(lignes[idx + 1]) : null;
+    }
+    lignes.forEach((l, idx) => {
         const L = sansAccent(l);
-        const v = dernierNombre(l);
-        if (v === null)
-            return;
-        if (ttc === null && /(TOTAL\s*T\.?T\.?C|NET\s*A\s*PAYER|MONTANT\s*T\.?T\.?C)/.test(L))
-            ttc = v;
-        else if (ht === null && /(TOTAL\s*H\.?T|MONTANT\s*H\.?T|BASE\s*H\.?T|HORS\s*TAXE)/.test(L))
-            ht = v;
-        else if (tgc === null && /(TGC|T\.G\.C|TVA)/.test(L) && !/TOTAL\s*T\.?T\.?C/.test(L))
-            tgc = v;
+        if (ttc === null && /(TOTAL\s*T\.?\s?T\.?\s?C|MONTANT\s*T\.?\s?T\.?\s?C|NET\s*A\s*PAYER|A\s*PAYER|TOTAL\s*GENERAL|TOTAL\s*A\s*REGLER)/.test(L))
+            ttc = valeurPres(idx);
+        else if (ht === null && /(TOTAL\s*H\.?\s?T|MONTANT\s*H\.?\s?T|BASE\s*H\.?\s?T|HORS\s*TAXE|SOUS[\s-]*TOTAL)/.test(L))
+            ht = valeurPres(idx);
+        else if (tgc === null && /(TGC|T\.\s?G\.\s?C|TVA|TAXE)/.test(L) && !/TOTAL\s*T\.?\s?T\.?\s?C/.test(L))
+            tgc = valeurPres(idx);
     });
-    // Repêchage : un « TTC » seul en fin de document est souvent le total.
+    // Repêchage : un « TTC » isolé en fin de document est le plus souvent le total.
     if (ttc === null)
         lignes.slice().reverse().some((l) => {
-            if (/T\.?T\.?C/i.test(l)) {
+            if (/T\.?\s?T\.?\s?C/i.test(l)) {
                 ttc = dernierNombre(l);
                 return ttc !== null;
             }
             return false;
         });
-    // Deux montants suffisent à déduire le troisième.
     if (ht !== null && tgc !== null && ttc === null)
         ttc = ht + tgc;
     if (ht !== null && ttc !== null && tgc === null)
         tgc = ttc - ht;
     if (tgc !== null && ttc !== null && ht === null)
         ht = ttc - tgc;
-    // Le fournisseur est cherché en tête de document : la ligne la plus
-    // substantielle qui ne soit ni une date, ni une adresse, ni un montant.
+    // Contrôles de vraisemblance : une lecture qui donne un HT supérieur au TTC
+    // ou une taxe démesurée est une erreur de reconnaissance, pas une facture.
+    if (ht !== null && ttc !== null && ht > ttc) {
+        const t = ht;
+        ht = ttc;
+        ttc = t;
+        tgc = ttc - ht;
+    }
+    if (tgc !== null && ttc !== null && (tgc > ttc * 0.35 || tgc < 0))
+        tgc = null;
+    if (ht !== null && tgc !== null && ttc !== null && Math.abs(ht + tgc - ttc) > Math.max(1, ttc * 0.02))
+        tgc = Math.round((ttc - ht) * 100) / 100;
+    // Les soustractions en virgule flottante produisent des 897.6999999999998 :
+    // on arrondit au centime avant d'afficher quoi que ce soit.
+    const c2 = (v) => (v === null ? null : Math.round(v * 100) / 100);
+    ht = c2(ht);
+    tgc = c2(tgc);
+    ttc = c2(ttc);
     let fournisseur = "";
     for (const l of lignes.slice(0, 6)) {
         const L = sansAccent(l);
-        // Au moins quatre lettres, sinon c'est un numéro ou une référence.
         if (l.replace(/[^A-Za-zÀ-ÿ]/g, "").length < 4)
             continue;
-        // On écarte les en-têtes, coordonnées et surtout les lignes de montant :
-        // prendre la plus longue attrapait « TOTAL HT 4 262,30 ».
         if (/(FACTURE|DEVIS|BON\s*DE|DATE|TEL|RIDET|N°|SIRET|ADRESSE|TOTAL|MONTANT|NET\s*A\s*PAYER|TGC|TVA|T\.?T\.?C|H\.?T\b|INVOICE)/.test(L))
             continue;
-        // Une ligne composée surtout de chiffres est une adresse ou un montant.
         const chiffres = (l.match(/\d/g) || []).length;
         if (chiffres > l.length * 0.3)
             continue;
-        // La raison sociale est en tête : on garde la première ligne valable.
         fournisseur = l;
         break;
     }
@@ -1070,7 +1133,13 @@ async function lireFacture(fichier, surAvancement) {
         },
     });
     try {
-        const r = await worker.recognize(fichier);
+        surAvancement("Préparation de l'image…", 0.15);
+        let source = fichier;
+        try {
+            source = await preparerPourOcr(fichier, 1700);
+        }
+        catch (e) { }
+        const r = await worker.recognize(source);
         surAvancement("Analyse…", 0.98);
         return analyserFacture(r.data.text);
     }

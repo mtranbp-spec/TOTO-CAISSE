@@ -344,10 +344,18 @@ async function chargerLogo() {
 // (U+202F) que les polices standard du PDF rendent comme une barre oblique :
 // « 45 000 F » devenait « 45/000 F ». On la remplace par une espace normale.
 // Comparaison souple : « the glace » doit trouver « Thé Glacé ».
-// Les codes-barres sont comparés sans espaces et en majuscules : une douchette
-// mal réglée peut renvoyer des minuscules, et un code reste le même code.
+// Une douchette réglée en QWERTY branchée sur un clavier AZERTY n'envoie pas
+// des chiffres mais les touches de la rangée du haut : on reçoit « &é"'(-è_çà »
+// au lieu de « 1234567890 ». C'est ce qui oblige à maintenir Majuscule. On
+// retraduit ici, ce qui évite d'avoir à reconfigurer le matériel.
+const TOUCHES_AZERTY = { "&": "1", "é": "2", '"': "3", "'": "4", "(": "5", "-": "6", "è": "7", "_": "8", "ç": "9", "à": "0" };
+function corrigerClavier(t) {
+    return String(t || "").split("").map((c) => (TOUCHES_AZERTY[c] !== undefined ? TOUCHES_AZERTY[c] : c)).join("");
+}
+// Les codes sont comparés sans espaces et en majuscules : un code reste le
+// même code, quelle que soit la casse renvoyée par la douchette.
 function normaliserEan(t) {
-    return String(t || "").replace(/\s/g, "").toUpperCase();
+    return corrigerClavier(String(t || "").replace(/\s/g, "")).toUpperCase();
 }
 function normaliser(t) {
     return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -1775,7 +1783,7 @@ function App() {
                 tampon = "";
                 debut = t;
             }
-            tampon += e.key;
+            tampon += corrigerClavier(e.key);
             derniere = t;
             // Beaucoup de douchettes n'envoient pas Entrée tant qu'on ne les a
             // pas configurées pour. On valide donc aussi après une courte

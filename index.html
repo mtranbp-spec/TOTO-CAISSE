@@ -3257,69 +3257,96 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     function nouveau() {
         setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], lignes: [], note: "", photo: "" });
     }
-    async function surPhoto(e) {
-        const f = e.target.files && e.target.files[0];
-        e.target.value = "";
-        if (!f)
-            return;
-        setAvancement({ texte: "Compression de la photo…", part: 0.02 });
+    // Analyse d'une photo : renvoie la fiche prête à enregistrer, ou null.
+    async function analyserUne(f, avancer) {
         let img;
         try {
             img = await compresserImage(f, 1000, 0.6);
         }
         catch (err) {
-            setAvancement(null);
-            showToast("⚠️ " + err.message);
-            return;
+            return null;
         }
-        const base = { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], lignes: [], note: "", photo: "" };
-        setForm({ ...base, photo: img.url });
-        // On tente l'analyse en ligne, nettement plus fiable. Si le réseau ou
-        // le service manque, on retombe sur la lecture locale plutôt que de
-        // laisser l'utilisateur devant un formulaire vide.
         let lu = null, secours = false;
         try {
-            lu = await analyserParIA(f, (texte, part) => setAvancement({ texte, part }));
+            lu = await analyserParIA(f, avancer);
         }
         catch (err1) {
             secours = true;
             try {
-                setAvancement({ texte: "Service en ligne indisponible — lecture locale…", part: 0.1 });
-                lu = await lireFacture(f, (texte, part) => setAvancement({ texte, part }));
+                lu = await lireFacture(f, avancer);
             }
             catch (err2) {
-                setAvancement(null);
-                showToast("⚠️ Lecture impossible : " + err2.message);
-                return;
+                return null;
             }
         }
-        setForm((p) => ({
-            ...(p || base),
-            fournisseur: lu.fournisseur || (p ? p.fournisseur : ""),
-            dateKey: /^\d{4}-\d{2}-\d{2}$/.test(lu.date || "") ? lu.date : (p ? p.dateKey : todayKey()),
-            numero: lu.numero || (p ? p.numero : ""),
-            ht: lu.ht !== null ? String(lu.ht) : (p ? p.ht : ""),
-            tgc: lu.tgc !== null ? String(lu.tgc) : (p ? p.tgc : ""),
-            ttc: lu.ttc !== null ? String(lu.ttc) : (p ? p.ttc : ""),
-        }));
-        setForm((p) => {
-            if (!p)
-                return p;
-            const v = Array.isArray(lu.ventilation) && lu.ventilation.length
-                ? lu.ventilation.map((l) => ({ taux: Number(l.taux) || 0, ht: String(l.ht || 0), tgc: String(l.tgc || 0) }))
-                : (lu.ht ? [{ taux: tauxDepuisMontants(lu.ht, lu.tgc) || 0, ht: String(lu.ht), tgc: String(lu.tgc || 0) }] : []);
-            return { ...p, ventilation: v, lignes: Array.isArray(lu.lignes) ? lu.lignes : [] };
-        });
-        const trouves = [lu.ht, lu.tgc, lu.ttc].filter((x) => x !== null && x !== undefined).length;
+        const v = Array.isArray(lu.ventilation) && lu.ventilation.length
+            ? lu.ventilation.map((l) => ({ taux: Number(l.taux) || 0, ht: Number(l.ht) || 0, tgc: Number(l.tgc) || 0 }))
+            : (lu.ht ? [{ taux: tauxDepuisMontants(lu.ht, lu.tgc) || 0, ht: Number(lu.ht) || 0, tgc: Number(lu.tgc) || 0 }] : []);
+        return {
+            fournisseur: lu.fournisseur || "",
+            dateKey: /^\d{4}-\d{2}-\d{2}$/.test(lu.date || "") ? lu.date : todayKey(),
+            numero: lu.numero || "",
+            ht: Number(lu.ht) || 0,
+            tgc: Number(lu.tgc) || 0,
+            ttc: Number(lu.ttc) || 0,
+            ventilation: v,
+            lignes: Array.isArray(lu.lignes) ? lu.lignes : [],
+            note: "",
+            photo: img.url,
+            createdAt: new Date().toISOString(),
+            // Marque les fiches à revoir : lecture de secours, confiance faible
+            // ou montant manquant. Elles ressortent en jaune dans la liste.
+            aVerifier: secours || (typeof lu.confiance === "number" && lu.confiance < 0.8) || !(Number(lu.ttc) > 0),
+        };
+    }
+    async function surPhoto(e) {
+        const fichiers = Array.from(e.target.files || []);
+        e.target.value = "";
+        if (!fichiers.length)
+            return;
+        // Une seule photo : on ouvre la fiche pour validation immédiate.
+        if (fichiers.length === 1) {
+            setAvancement({ texte: "Compression de la photo…", part: 0.02 });
+            const fiche = await analyserUne(fichiers[0], (texte, part) => setAvancement({ texte, part }));
+            setAvancement(null);
+            if (!fiche) {
+                showToast("⚠️ Lecture impossible");
+                return;
+            }
+            setForm({
+                fournisseur: fiche.fournisseur, dateKey: fiche.dateKey, numero: fiche.numero,
+                ht: String(fiche.ht || ""), tgc: String(fiche.tgc || ""), ttc: String(fiche.ttc || ""),
+                ventilation: fiche.ventilation.map((l) => ({ taux: l.taux, ht: String(l.ht), tgc: String(l.tgc) })),
+                lignes: fiche.lignes, note: "", photo: fiche.photo,
+            });
+            showToast(fiche.aVerifier ? "Lecture incertaine — vérifie les montants" : "Facture lue — vérifie et valide");
+            return;
+        }
+        // Plusieurs photos : traitement à la chaîne et enregistrement direct.
+        // Ouvrir une fiche par facture annulerait tout l'intérêt du lot.
+        let reussies = 0, aRevoir = 0, echecs = 0;
+        for (let i = 0; i < fichiers.length; i++) {
+            const n = i + 1;
+            const fiche = await analyserUne(fichiers[i], (texte, part) => setAvancement({ texte: "Facture " + n + " sur " + fichiers.length + " — " + texte, part: (i + part) / fichiers.length }));
+            if (!fiche) {
+                echecs++;
+                continue;
+            }
+            try {
+                await saveAchat(fiche);
+                reussies++;
+                if (fiche.aVerifier)
+                    aRevoir++;
+            }
+            catch (err) {
+                echecs++;
+            }
+        }
         setAvancement(null);
-        if (trouves === 0)
-            showToast("Aucun montant reconnu — saisis-les à la main");
-        else if (secours)
-            showToast("Lecture locale : vérifie bien les montants");
-        else if (typeof lu.confiance === "number" && lu.confiance < 0.8)
-            showToast("Lecture incertaine — vérifie les montants");
-        else
-            showToast("Facture lue — vérifie et valide");
+        const bilan = [reussies + " enregistrée" + (reussies > 1 ? "s" : ""),
+            aRevoir ? aRevoir + " à vérifier" : null,
+            echecs ? echecs + " en échec" : null].filter(Boolean).join(" · ");
+        showToast(bilan);
     }
     // Les totaux découlent toujours de la ventilation : impossible d'avoir un
     // total qui ne corresponde pas au détail.
@@ -3392,6 +3419,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             photo: form.photo || "",
             createdAt: new Date().toISOString(),
         };
+        a.aVerifier = false;
         saveAchat(a, form.id)
             .then(() => { showToast(form.id ? "Facture corrigée" : "Achat enregistré"); setForm(null); })
             .catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible")));
@@ -3402,8 +3430,8 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             React.createElement("div", { style: { display: "flex", gap: 8 } },
                 React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: PANEL, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer" } },
                     React.createElement(Icon.Camera, { size: 14, color: ACCENT_GREEN }),
-                    "Scanner une facture",
-                    React.createElement("input", { ref: fichier, type: "file", accept: "image/*", capture: "environment", onChange: surPhoto, style: { display: "none" } })),
+                    "Scanner des factures",
+                    React.createElement("input", { ref: fichier, type: "file", accept: "image/*", multiple: true, onChange: surPhoto, style: { display: "none" } })),
                 React.createElement("button", { onClick: nouveau, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: ACCENT, color: "#fff" } },
                     React.createElement(Icon.Plus, { size: 14 }), "Saisir"))),
         React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 4 } }, PERIODES.map((opt) => React.createElement("button", { key: opt.cle, onClick: () => setPeriode(opt.cle), style: { flexShrink: 0, padding: "7px 13px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: periode === opt.cle ? ACCENT : PANEL, color: periode === opt.cle ? "#fff" : TEXT_MUTED, border: `1px solid ${periode === opt.cle ? ACCENT : LINE}` } }, opt.label))),
@@ -3429,6 +3457,10 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             React.createElement(KpiCard, { label: "TGC déductible", value: fmt(totaux.tgc), color: ACCENT_GREEN }),
             React.createElement(KpiCard, { label: "Total TTC", value: fmt(totaux.ttc), color: GOLD }),
             React.createElement(KpiCard, { label: "Factures", value: String(visibles.length), color: TEXT })),
+        visibles.filter((a) => a.aVerifier).length > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 14, borderRadius: 12, background: "rgba(232,180,74,0.1)", border: "1px solid #E8B44A" } },
+            React.createElement("span", { style: { flex: 1, fontSize: 12, color: "#E8B44A" } },
+                visibles.filter((a) => a.aVerifier).length + " facture" + (visibles.filter((a) => a.aVerifier).length > 1 ? "s" : "") + " à vérifier — lecture incertaine ou montant manquant"),
+            React.createElement("span", { style: { fontSize: 11, color: TEXT_MUTED } }, "Touche la ligne pour corriger")),
         React.createElement("div", { style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, overflow: "hidden" } },
             visibles.length === 0
                 ? React.createElement("div", { style: { textAlign: "center", padding: "34px 16px" } },
@@ -3445,7 +3477,9 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                             React.createElement("img", { src: a.photo, alt: "", style: { width: "100%", height: "100%", objectFit: "cover" } }))
                         : React.createElement("div", { style: { width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: BG, border: `1px solid ${LINE}` } }),
                     React.createElement("button", { onClick: () => modifier(a), title: "Ouvrir pour vérifier ou corriger", style: { flex: 1, minWidth: 0, textAlign: "left", padding: 0, background: "transparent" } },
-                        React.createElement("div", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.fournisseur),
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+                            React.createElement("span", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.fournisseur || "Fournisseur à saisir"),
+                            a.aVerifier && React.createElement("span", { style: { flexShrink: 0, padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 600, background: "rgba(232,180,74,0.15)", color: "#E8B44A", border: "1px solid #E8B44A" } }, "À VÉRIFIER")),
                         React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 1 } }, [shortDayLabel(a.dateKey), a.numero || null, "HT " + fmt(a.ht || 0)].filter(Boolean).join(" · ")),
                         // Le détail par taux à même la ligne : c'est l'information
                         // qu'on vient chercher, elle ne doit pas être cachée.

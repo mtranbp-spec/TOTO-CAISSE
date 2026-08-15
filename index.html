@@ -1892,13 +1892,21 @@ function App() {
         const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim(), tgc: Number(form.tgc) || 0, ean: eanPropre };
         if (editing === "new") {
             const id = "p" + Date.now();
+            // Un nouveau produit se place à la fin de la liste.
+            const ordre = orderedProducts.length ? Math.max(...orderedProducts.map((x) => (typeof x.order === "number" ? x.order : 0))) + 1 : 0;
             if (db)
-                db.collection("products").doc(id).set(productData).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
+                db.collection("products").doc(id).set({ ...productData, order: ordre }).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
             showToast("Produit ajouté");
         }
         else {
+            // set() remplace le document entier : sans cette ligne, le champ
+            // d'ordre disparaissait et le produit modifié repartait en fin de
+            // liste. On reprend donc sa position actuelle.
+            const avant = products.find((x) => x.id === editing);
+            const ordre = avant && typeof avant.order === "number" ? avant.order : undefined;
+            const donnees = ordre === undefined ? productData : { ...productData, order: ordre };
             if (db)
-                db.collection("products").doc(editing).set(productData).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
+                db.collection("products").doc(editing).set(donnees).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
             showToast("Produit modifié");
         }
         setEditing(null);
@@ -2162,9 +2170,19 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
     const [reorder, setReorder] = useState(false);
     const [catLibre, setCatLibre] = useState(false);
     const [recherche, setRecherche] = useState("");
+    const [confirmSuppr, setConfirmSuppr] = useState(false);
+    const carteProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) openEditProduct(p); }, style: { width: "100%", height: "100%", minHeight: 64, display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 14px", background: PANEL, border: `1px solid ${LINE}` } },
+        React.createElement("div", { style: { width: 8, height: 34, borderRadius: 999, flexShrink: 0, background: catColor(p.category) } }),
+        React.createElement("div", { style: { flex: 1, minWidth: 0 } },
+            React.createElement("div", { className: "toto-nom2", style: { fontSize: 14, fontWeight: 500, color: TEXT } }, p.name),
+            React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED } },
+                p.category,
+                " \u00B7 marge ",
+                fmt(p.price - (p.cost || 0)))),
+        React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(p.price)));
     // On rouvre toujours le formulaire produit sur les pastilles. Le champ
     // libre ne réapparaît que si la catégorie du produit n'existe plus.
-    useEffect(() => { setCatLibre(false); }, [editing]);
+    useEffect(() => { setCatLibre(false); setConfirmSuppr(false); }, [editing]);
     // Échap dans l'onglet Produits. La confirmation de suppression revient à
     // l'écran précédent plutôt que de tout fermer : on ne perd pas la saisie
     // en cours par un appui réflexe.
@@ -2244,6 +2262,15 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
         const base = n ? products.filter((p) => normaliser(p.name).indexOf(n) !== -1) : products;
         return (activeCategory === "Toutes" || n) ? base : base.filter((p) => p.category === activeCategory);
     }, [products, activeCategory, recherche]);
+    // Même présentation que la Caisse : une section par catégorie, dans l'ordre
+    // que tu as défini. Les catégories vides sont omises.
+    const groupes = useMemo(() => {
+        const g = categories.map((nom) => ({ nom, produits: visibleProducts.filter((p) => p.category === nom) })).filter((x) => x.produits.length > 0);
+        const orphelins = visibleProducts.filter((p) => !p.category || categories.indexOf(p.category) === -1);
+        if (orphelins.length)
+            g.push({ nom: "Sans catégorie", produits: orphelins });
+        return g;
+    }, [categories, visibleProducts]);
     return (React.createElement("div", { style: { padding: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
             React.createElement("span", { className: "font-display", style: { fontSize: 18, color: TEXT } },
@@ -2280,21 +2307,27 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                 React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }),
                 "Catégorie"),
             React.createElement(ReorderButton, { active: reorder, onClick: () => setReorder((v) => !v) })),
-        React.createElement(ReorderGrid, {
-            items: visibleProducts,
-            active: reorder,
-            onReorder: reorderProducts,
-            gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, alignItems: "stretch" },
-            renderItem: (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) openEditProduct(p); }, style: { width: "100%", height: "100%", minHeight: 64, display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 14px", background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { style: { width: 8, height: 34, borderRadius: 999, flexShrink: 0, background: catColor(p.category) } }),
-                React.createElement("div", { style: { flex: 1, minWidth: 0 } },
-                    React.createElement("div", { className: "toto-nom2", style: { fontSize: 14, fontWeight: 500, color: TEXT } }, p.name),
-                    React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED } },
-                        p.category,
-                        " \u00B7 marge ",
-                        fmt(p.price - (p.cost || 0)))),
-                React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(p.price))),
-        }),
+        activeCategory === "Toutes" && !recherche
+            ? React.createElement("div", null, groupes.map((g) => React.createElement("div", { key: g.nom, style: { marginBottom: 18 } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } },
+                    React.createElement("span", { style: { width: 10, height: 10, borderRadius: 999, flexShrink: 0, background: catColor(g.nom) } }),
+                    React.createElement("span", { className: "font-display", style: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", whiteSpace: "nowrap", color: TEXT_MUTED } }, g.nom),
+                    React.createElement("span", { style: { fontSize: 11, color: TEXT_MUTED } }, g.produits.length),
+                    React.createElement("span", { style: { flex: 1, height: 1, background: LINE } })),
+                React.createElement(ReorderGrid, {
+                    items: g.produits,
+                    active: reorder,
+                    onReorder: reorderProducts,
+                    gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, alignItems: "stretch" },
+                    renderItem: carteProduit,
+                }))))
+            : React.createElement(ReorderGrid, {
+                items: visibleProducts,
+                active: reorder,
+                onReorder: reorderProducts,
+                gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, alignItems: "stretch" },
+                renderItem: carteProduit,
+            }),
         editing && (React.createElement("div", { onClick: closeForm, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16, background: "rgba(0,0,0,0.5)" } },
             React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
@@ -2340,7 +2373,16 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 4 } }, "Laisse vide pour un plat maison, qui n'a pas de code."),
                 formError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 8 } }, formError),
                 React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
-                editing !== "new" && React.createElement("button", { onClick: () => deleteProduct(editing), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit")))),
+                editing !== "new" && (confirmSuppr
+                    ? React.createElement("div", { style: { marginTop: 12, padding: 14, borderRadius: 12, background: BG, border: `1px solid #C2352A` } },
+                        React.createElement("div", { style: { fontSize: 13, color: TEXT, marginBottom: 4 } },
+                            "Supprimer « ",
+                            form.name || "ce produit",
+                            " » ?"),
+                        React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginBottom: 12 } }, "Définitif. Les ventes déjà encaissées ne sont pas modifiées."),
+                        React.createElement("button", { onClick: () => deleteProduct(editing), className: "font-display", style: { width: "100%", padding: "11px 0", borderRadius: 10, fontSize: 14, fontWeight: 600, background: "#C2352A", color: "#fff" } }, "Supprimer définitivement"),
+                        React.createElement("button", { onClick: () => setConfirmSuppr(false), style: { width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Annuler"))
+                    : React.createElement("button", { onClick: () => setConfirmSuppr(true), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit"))))),
         catForm && (React.createElement("div", { onClick: () => { setCatForm(null); setConfirmPin(null); setCatError(null); }, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.5)" } },
             React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },

@@ -1124,6 +1124,24 @@ function analyserFacture(texte) {
 // Le Worker Cloudflare garde la clé Gemini : l'appli ne lui envoie qu'une
 // photo et reçoit les champs déjà structurés.
 const URL_ANALYSE = "https://jolly-morning-19b6.mtranbp.workers.dev/";
+// Le taux se déduit du rapport TGC / HT, puis on le cale sur le taux légal le
+// plus proche : une facture arrondie au franc ne donne jamais 22,000 % pile.
+function tauxDepuisMontants(ht, tgc) {
+    if (!ht || ht <= 0 || tgc === null || tgc === undefined)
+        return null;
+    const brut = (tgc / ht) * 100;
+    let meilleur = null, ecartMin = Infinity;
+    TAUX_TGC.forEach((t) => {
+        const e = Math.abs(brut - t);
+        if (e < ecartMin) {
+            ecartMin = e;
+            meilleur = t;
+        }
+    });
+    // Au-delà d'un point d'écart, la facture mélange probablement plusieurs
+    // taux : on ne tranche pas à sa place.
+    return ecartMin <= 1 ? meilleur : null;
+}
 async function analyserParIA(fichier, surAvancement) {
     surAvancement("Préparation de l'image…", 0.12);
     // 1500 px suffisent largement au modèle et limitent le temps d'envoi
@@ -1209,6 +1227,65 @@ function heureFr(iso) {
         return "";
     const d = new Date(iso);
     return isNaN(d) ? "" : d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+async function exporterAchatsExcel(achats, libelle, showToast) {
+    let XLSX;
+    try {
+        XLSX = await chargerXLSX();
+    }
+    catch (e) {
+        showToast("⚠️ Export impossible : " + e.message);
+        return;
+    }
+    const fAchats = achats.map((a) => ({
+        "Date": dateFr(a.dateKey ? a.dateKey + "T12:00:00" : a.createdAt),
+        "Fournisseur": a.fournisseur || "",
+        "N° facture": a.numero || "",
+        "Taux TGC": (a.tauxTgc === null || a.tauxTgc === undefined) ? "mixte" : a.tauxTgc / 100,
+        "Total HT": arrondi2(a.ht || 0),
+        "TGC déductible": arrondi2(a.tgc || 0),
+        "Total TTC": arrondi2(a.ttc || 0),
+        "Note": a.note || "",
+        "Photo": a.photo ? "oui" : "non",
+    }));
+    // Ventilation par taux : la forme sous laquelle la TGC déductible se déclare.
+    const m = new Map();
+    achats.forEach((a) => {
+        const t = (a.tauxTgc === null || a.tauxTgc === undefined) ? "mixte" : a.tauxTgc;
+        const e = m.get(t) || { ht: 0, tgc: 0, ttc: 0, nb: 0 };
+        e.ht += a.ht || 0;
+        e.tgc += a.tgc || 0;
+        e.ttc += a.ttc || 0;
+        e.nb++;
+        m.set(t, e);
+    });
+    const fTaux = Array.from(m.entries())
+        .sort((x, y) => (x[0] === "mixte" ? 99 : x[0]) - (y[0] === "mixte" ? 99 : y[0]))
+        .map(([t, e]) => ({
+            "Taux TGC": t === "mixte" ? "mixte" : t / 100,
+            "Factures": e.nb,
+            "Base HT": arrondi2(e.ht),
+            "TGC déductible": arrondi2(e.tgc),
+            "Total TTC": arrondi2(e.ttc),
+        }));
+    const total = achats.reduce((t, a) => ({ ht: t.ht + (a.ht || 0), tgc: t.tgc + (a.tgc || 0), ttc: t.ttc + (a.ttc || 0) }), { ht: 0, tgc: 0, ttc: 0 });
+    fTaux.push({ "Taux TGC": "TOTAL", "Factures": achats.length, "Base HT": arrondi2(total.ht), "TGC déductible": arrondi2(total.tgc), "Total TTC": arrondi2(total.ttc) });
+    const classeur = XLSX.utils.book_new();
+    const ajouter = (donnees, nom, largeurs) => {
+        const f = XLSX.utils.json_to_sheet(donnees.length ? donnees : [{ "Aucune donnée": "" }]);
+        f["!cols"] = largeurs.map((w) => ({ wch: w }));
+        XLSX.utils.book_append_sheet(classeur, f, nom);
+    };
+    ajouter(fAchats, "Achats", [11, 32, 14, 9, 12, 15, 12, 26, 7]);
+    ajouter(fTaux, "TGC par taux", [10, 10, 13, 15, 12]);
+    const nom = "TOTO-achats-" + String(libelle || "export").replace(/[^\w-]+/g, "-").toLowerCase() + "-" + todayKey() + ".xlsx";
+    try {
+        XLSX.writeFile(classeur, nom);
+        showToast("Export « " + nom + " » généré");
+    }
+    catch (e) {
+        showToast("⚠️ Écriture impossible : " + e.message);
+    }
 }
 async function exporterExcel(ventes, produits, libelle, showToast) {
     let XLSX;
@@ -2850,6 +2927,148 @@ function BarreDefilante({ children, actif, style }) {
     }, [actif]);
     return React.createElement("div", { ref: zone, className: "toto-barre-glisse", style: style }, children);
 }
+/* ---------- Facture d'achat en PDF ---------- */
+// La photo est retravaillée avant d'entrer dans le PDF : niveaux de gris et
+// contraste étiré, ce qui lui donne l'aspect d'un document numérisé plutôt
+// que d'une photo de téléphone.
+function nettoyerPourPdf(dataUrl) {
+    return new Promise((res) => {
+        const img = new Image();
+        img.onerror = () => res(dataUrl);
+        img.onload = () => {
+            try {
+                const c = document.createElement("canvas");
+                c.width = img.width;
+                c.height = img.height;
+                const g = c.getContext("2d", { willReadFrequently: true });
+                g.drawImage(img, 0, 0);
+                const d = g.getImageData(0, 0, c.width, c.height);
+                const px = d.data;
+                let mini = 255, maxi = 0;
+                for (let i = 0; i < px.length; i += 4) {
+                    const l = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) | 0;
+                    px[i] = l;
+                    if (l < mini) mini = l;
+                    if (l > maxi) maxi = l;
+                }
+                const ecart = Math.max(1, maxi - mini);
+                for (let i = 0; i < px.length; i += 4) {
+                    let v = ((px[i] - mini) * 255 / ecart) | 0;
+                    v = v < 105 ? Math.max(0, v - 35) : v > 170 ? Math.min(255, v + 35) : v;
+                    px[i] = px[i + 1] = px[i + 2] = v;
+                    px[i + 3] = 255;
+                }
+                g.putImageData(d, 0, 0);
+                res(c.toDataURL("image/jpeg", 0.85));
+            }
+            catch (e) {
+                res(dataUrl);
+            }
+        };
+        img.src = dataUrl;
+    });
+}
+function dimensionsImage(dataUrl) {
+    return new Promise((res) => {
+        const i = new Image();
+        i.onload = () => res({ l: i.width, h: i.height });
+        i.onerror = () => res({ l: 1000, h: 1400 });
+        i.src = dataUrl;
+    });
+}
+async function pageAchat(doc, a, premiere) {
+    const M = 12, L = 210 - M * 2;
+    if (!premiere)
+        doc.addPage();
+    let y = M + 4;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(20, 20, 20);
+    doc.text(String(a.fournisseur || "Fournisseur inconnu"), M, y);
+    y += 7;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(90, 90, 90);
+    const entete = [a.dateKey ? "Date : " + shortDayLabel(a.dateKey) : null, a.numero ? "Facture n° " + a.numero : null,
+        (a.tauxTgc === null || a.tauxTgc === undefined) ? "TGC : taux mixte" : "TGC : " + a.tauxTgc + " %"].filter(Boolean);
+    doc.text(entete.join("     "), M, y);
+    y += 7;
+    doc.setDrawColor(214, 31, 26);
+    doc.setLineWidth(0.7);
+    doc.line(M, y, 210 - M, y);
+    y += 7;
+    doc.setTextColor(20, 20, 20);
+    doc.setFontSize(11);
+    doc.text("Total HT", M, y);
+    doc.text(fmtPdf(a.ht || 0), 78, y, { align: "right" });
+    doc.text("TGC", 95, y);
+    doc.text(fmtPdf(a.tgc || 0), 140, y, { align: "right" });
+    doc.setFont("helvetica", "bold");
+    doc.text("Total TTC", 155, y);
+    doc.text(fmtPdf(a.ttc || 0), 210 - M, y, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    y += 6;
+    if (a.note) {
+        doc.setFontSize(9);
+        doc.setTextColor(90, 90, 90);
+        doc.text(String(a.note).slice(0, 160), M, y);
+        doc.setTextColor(20, 20, 20);
+        y += 5;
+    }
+    y += 2;
+    if (a.photo) {
+        const propre = await nettoyerPourPdf(a.photo);
+        const dim = await dimensionsImage(propre);
+        const dispoH = 297 - y - 14;
+        const ratio = Math.min(L / dim.l, dispoH / dim.h);
+        const w = dim.l * ratio, h = dim.h * ratio;
+        doc.addImage(propre, "JPEG", M + (L - w) / 2, y, w, h);
+        doc.setDrawColor(210, 210, 210);
+        doc.setLineWidth(0.2);
+        doc.rect(M + (L - w) / 2, y, w, h);
+    }
+    else {
+        doc.setFontSize(10);
+        doc.setTextColor(150, 150, 150);
+        doc.text("Aucune photo enregistrée pour cette facture.", M, y + 10);
+    }
+    doc.setFontSize(7.5);
+    doc.setTextColor(150, 150, 150);
+    doc.text("TOTO — justificatif d'achat", 105, 289, { align: "center" });
+}
+async function pdfAchats(liste, nomFichier, showToast) {
+    if (!liste.length) {
+        showToast("Aucune facture à exporter.");
+        return;
+    }
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ unit: "mm", format: "a4" });
+        for (let i = 0; i < liste.length; i++)
+            await pageAchat(doc, liste[i], i === 0);
+        const total = doc.getNumberOfPages();
+        if (total > 1)
+            for (let i = 1; i <= total; i++) {
+                doc.setPage(i);
+                doc.setFontSize(7.5);
+                doc.setTextColor(150, 150, 150);
+                doc.text(i + "/" + total, 210 - 12, 289, { align: "right" });
+            }
+        const blob = doc.output("blob");
+        const url = URL.createObjectURL(blob);
+        const el = document.createElement("a");
+        el.href = url;
+        el.download = nomFichier;
+        document.body.appendChild(el);
+        el.click();
+        el.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 8000);
+        showToast(liste.length > 1 ? liste.length + " factures exportées" : "Facture exportée en PDF");
+    }
+    catch (e) {
+        showToast("⚠️ PDF impossible : " + (e.message || "erreur"));
+    }
+}
 /* ---------- Onglet Achats ---------- */
 function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     const [periode, setPeriode] = useState("1m");
@@ -2869,10 +3088,25 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     const totaux = useMemo(() => visibles.reduce((t, a) => ({
         ht: t.ht + (a.ht || 0), tgc: t.tgc + (a.tgc || 0), ttc: t.ttc + (a.ttc || 0),
     }), { ht: 0, tgc: 0, ttc: 0 }), [visibles]);
+    // Ventilation par taux : c'est sous cette forme que la TGC déductible se
+    // déclare. Les factures à taux mixte sont isolées, pas noyées dans un taux.
+    const parTaux = useMemo(() => {
+        const m = new Map();
+        visibles.forEach((a) => {
+            const t = (a.tauxTgc === null || a.tauxTgc === undefined) ? "mixte" : a.tauxTgc;
+            const e = m.get(t) || { ht: 0, tgc: 0, ttc: 0, nb: 0 };
+            e.ht += a.ht || 0;
+            e.tgc += a.tgc || 0;
+            e.ttc += a.ttc || 0;
+            e.nb++;
+            m.set(t, e);
+        });
+        return Array.from(m.entries()).sort((x, y) => (x[0] === "mixte" ? 99 : x[0]) - (y[0] === "mixte" ? 99 : y[0]));
+    }, [visibles]);
     const champ = { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
     const label = { fontSize: 12, color: TEXT_MUTED };
     function nouveau() {
-        setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", note: "", photo: "" });
+        setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", tauxTgc: null, note: "", photo: "" });
     }
     async function surPhoto(e) {
         const f = e.target.files && e.target.files[0];
@@ -2889,7 +3123,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             showToast("⚠️ " + err.message);
             return;
         }
-        const base = { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", note: "", photo: "" };
+        const base = { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", tauxTgc: null, note: "", photo: "" };
         setForm({ ...base, photo: img.url });
         // On tente l'analyse en ligne, nettement plus fiable. Si le réseau ou
         // le service manque, on retombe sur la lecture locale plutôt que de
@@ -2919,6 +3153,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             tgc: lu.tgc !== null ? String(lu.tgc) : (p ? p.tgc : ""),
             ttc: lu.ttc !== null ? String(lu.ttc) : (p ? p.ttc : ""),
         }));
+        setForm((p) => (p ? { ...p, tauxTgc: tauxDepuisMontants(lu.ht, lu.tgc) } : p));
         const trouves = [lu.ht, lu.tgc, lu.ttc].filter((x) => x !== null && x !== undefined).length;
         setAvancement(null);
         if (trouves === 0)
@@ -2943,6 +3178,10 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 f.tgc = String(Math.round((ttc - ht) * 100) / 100);
             else if (cle !== "ht" && tgc !== null && ttc !== null)
                 f.ht = String(Math.round((ttc - tgc) * 100) / 100);
+            const h2 = n(f.ht), g2 = n(f.tgc);
+            const deduit = tauxDepuisMontants(h2, g2);
+            if (deduit !== null)
+                f.tauxTgc = deduit;
             return f;
         });
     }
@@ -2961,6 +3200,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             dateKey: form.dateKey || todayKey(),
             numero: form.numero.trim(),
             ht: n(form.ht), tgc: n(form.tgc), ttc: n(form.ttc),
+            tauxTgc: (form.tauxTgc === null || form.tauxTgc === undefined) ? (tauxDepuisMontants(n(form.ht), n(form.tgc))) : Number(form.tauxTgc),
             note: form.note.trim(),
             photo: form.photo || "",
             createdAt: new Date().toISOString(),
@@ -2980,6 +3220,20 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 React.createElement("button", { onClick: nouveau, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: ACCENT, color: "#fff" } },
                     React.createElement(Icon.Plus, { size: 14 }), "Saisir"))),
         React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 4 } }, PERIODES.map((opt) => React.createElement("button", { key: opt.cle, onClick: () => setPeriode(opt.cle), style: { flexShrink: 0, padding: "7px 13px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: periode === opt.cle ? ACCENT : PANEL, color: periode === opt.cle ? "#fff" : TEXT_MUTED, border: `1px solid ${periode === opt.cle ? ACCENT : LINE}` } }, opt.label))),
+        React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" } },
+            React.createElement("button", { onClick: () => pdfAchats(visibles, "TOTO-factures-achat-" + todayKey() + ".pdf", showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
+                React.createElement(Icon.Doc, { size: 14, color: visibles.length ? ACCENT : TEXT_MUTED }),
+                "Toutes les factures en PDF"),
+            React.createElement("button", { onClick: () => exporterAchatsExcel(visibles, (PERIODES.find((x) => x.cle === periode) || {}).longLabel, showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
+                React.createElement(Icon.Export, { size: 14, color: visibles.length ? ACCENT_GREEN : TEXT_MUTED }),
+                "Exporter vers Excel")),
+        parTaux.length > 0 && React.createElement("div", { style: { borderRadius: 14, padding: 14, marginBottom: 16, background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { className: "font-display", style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 10 } }, "TGC déductible par taux"),
+            parTaux.map(([taux, e]) => React.createElement("div", { key: String(taux), style: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${LINE}` } },
+                React.createElement("span", { className: "tabnum", style: { width: 62, fontSize: 13, fontWeight: 600, color: taux === "mixte" ? TEXT_MUTED : ACCENT_GREEN } }, taux === "mixte" ? "mixte" : taux + " %"),
+                React.createElement("span", { style: { flex: 1, fontSize: 11, color: TEXT_MUTED } }, e.nb + " facture" + (e.nb > 1 ? "s" : "")),
+                React.createElement("span", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, width: 92, textAlign: "right" } }, "HT " + fmt(e.ht)),
+                React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD, width: 88, textAlign: "right" } }, fmt(e.tgc))))),
         React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 18 } },
             React.createElement(KpiCard, { label: "Total HT", value: fmt(totaux.ht), color: TEXT }),
             React.createElement(KpiCard, { label: "TGC déductible", value: fmt(totaux.tgc), color: ACCENT_GREEN }),
@@ -2995,8 +3249,10 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                         : React.createElement("div", { style: { width: 34, height: 34, borderRadius: 8, flexShrink: 0, background: BG, border: `1px solid ${LINE}` } }),
                     React.createElement("div", { style: { flex: 1, minWidth: 0 } },
                         React.createElement("div", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.fournisseur),
-                        React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED } }, [shortDayLabel(a.dateKey), a.numero || null, "HT " + fmt(a.ht || 0), "TGC " + fmt(a.tgc || 0)].filter(Boolean).join(" · "))),
+                        React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED } }, [shortDayLabel(a.dateKey), a.numero || null, "HT " + fmt(a.ht || 0), "TGC " + fmt(a.tgc || 0) + ((a.tauxTgc === null || a.tauxTgc === undefined) ? "" : " (" + a.tauxTgc + " %)")].filter(Boolean).join(" · "))),
                     React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(a.ttc || 0)),
+                    React.createElement("button", { onClick: () => pdfAchats([a], "facture-" + (a.fournisseur || "achat").replace(/[^\w-]+/g, "-").toLowerCase() + "-" + a.dateKey + ".pdf", showToast), title: "Exporter en PDF", style: { width: 30, height: 30, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: `1px solid ${LINE}` } },
+                        React.createElement(Icon.Doc, { size: 13, color: TEXT_MUTED })),
                     React.createElement("button", { onClick: () => setASupprimer(a), title: "Supprimer", style: { width: 30, height: 30, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: `1px solid ${LINE}` } },
                         React.createElement(Icon.Trash, { size: 13, color: "#E86A5C" })))),
             visibles.length > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: BG } },
@@ -3043,6 +3299,13 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                         React.createElement("label", { style: label }, "Total TTC"),
                         React.createElement("input", { value: form.ttc, inputMode: "decimal", onChange: (e) => majMontant("ttc", e.target.value), style: { ...champ, borderColor: GOLD }, placeholder: "0" }))),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: -4, marginBottom: 10 } }, "Renseigne deux montants, le troisième se calcule."),
+                React.createElement("label", { style: label }, "Taux de TGC"),
+                React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6, marginBottom: 12 } },
+                    TAUX_TGC.map((t) => {
+                        const choisi = Number(form.tauxTgc) === t;
+                        return React.createElement("button", { key: t, onClick: () => setForm({ ...form, tauxTgc: t }), style: { padding: "7px 13px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: choisi ? ACCENT_GREEN : BG, color: choisi ? "#fff" : TEXT_MUTED, border: `1px solid ${choisi ? ACCENT_GREEN : LINE}` } }, t + " %");
+                    }),
+                    React.createElement("button", { onClick: () => setForm({ ...form, tauxTgc: null }), style: { padding: "7px 13px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: form.tauxTgc === null || form.tauxTgc === undefined ? PANEL : "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "Mixte")),
                 React.createElement("label", { style: label }, "Note"),
                 React.createElement("input", { value: form.note, onChange: (e) => setForm({ ...form, note: e.target.value }), style: champ, placeholder: "Facultatif" }),
                 React.createElement("button", { onClick: enregistrer, className: "font-display", style: { width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer l'achat")))));

@@ -346,17 +346,28 @@ async function chargerLogo() {
 // Comparaison souple : « the glace » doit trouver « Thé Glacé ».
 // Une douchette réglée en QWERTY branchée sur un clavier AZERTY n'envoie pas
 // des chiffres mais les touches de la rangée du haut : on reçoit « &é"'(-è_çà »
-// au lieu de « 1234567890 ». C'est ce qui oblige à maintenir Majuscule. On
-// retraduit ici, ce qui évite d'avoir à reconfigurer le matériel.
-const TOUCHES_AZERTY = { "&": "1", "é": "2", '"': "3", "'": "4", "(": "5", "-": "6", "è": "7", "_": "8", "ç": "9", "à": "0" };
-function corrigerClavier(t) {
-    return String(t || "").split("").map((c) => (TOUCHES_AZERTY[c] !== undefined ? TOUCHES_AZERTY[c] : c)).join("");
+// au lieu de « 1234567890 », d'où la Majuscule qu'il faut maintenir. On
+// retraduit ici, dans les deux casses, et on ne conserve QUE des chiffres :
+// un code-barres EAN ou UPC n'en contient jamais d'autres. Tout signe non
+// convertible est simplement écarté.
+const TOUCHES_AZERTY = {
+    "&": "1", "é": "2", '"': "3", "'": "4", "(": "5", "-": "6", "è": "7", "_": "8", "ç": "9", "à": "0",
+    "É": "2", "È": "7", "Ç": "9", "À": "0",
+    "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", "0": "0",
+};
+function chiffresSeuls(t) {
+    let r = "";
+    const src = String(t || "");
+    for (let i = 0; i < src.length; i++) {
+        const c = TOUCHES_AZERTY[src[i]];
+        if (c !== undefined)
+            r += c;
+    }
+    return r;
 }
-// Les codes sont comparés sans espaces et en majuscules : un code reste le
-// même code, quelle que soit la casse renvoyée par la douchette.
-function normaliserEan(t) {
-    return corrigerClavier(String(t || "").replace(/\s/g, "")).toUpperCase();
-}
+// Utilisé partout où un code est saisi, scanné ou comparé, pour que les deux
+// côtés subissent exactement le même traitement.
+function normaliserEan(t) { return chiffresSeuls(t); }
 function normaliser(t) {
     return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
@@ -1783,7 +1794,7 @@ function App() {
                 tampon = "";
                 debut = t;
             }
-            tampon += corrigerClavier(e.key);
+            tampon += chiffresSeuls(e.key);
             derniere = t;
             // Beaucoup de douchettes n'envoient pas Entrée tant qu'on ne les a
             // pas configurées pour. On valide donc aussi après une courte
@@ -2383,7 +2394,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                 })(),
                 React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "Code-barres (EAN)"),
                 React.createElement("div", { style: { position: "relative", marginTop: 4 } },
-                    React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: normaliserEan(e.target.value) }); }, autoCapitalize: "characters", autoCorrect: "off", spellCheck: false, style: { width: "100%", padding: "10px 12px", paddingRight: 46, borderRadius: 8, fontSize: 14, letterSpacing: 1, textTransform: "uppercase", background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, placeholder: "Clique ici puis scanne l'article" }),
+                    React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: chiffresSeuls(e.target.value) }); }, inputMode: "numeric", autoCorrect: "off", spellCheck: false, style: { width: "100%", padding: "10px 12px", paddingRight: 46, borderRadius: 8, fontSize: 15, letterSpacing: 1.5, background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, placeholder: "Clique ici puis scanne l'article" }),
                     React.createElement("button", { onClick: ouvrirCameraEan, title: "Scanner avec l'appareil photo", className: "toto-cam-mobile", style: { position: "absolute", right: 5, top: 5, width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
                         React.createElement(Icon.Camera, { size: 15, color: TEXT_MUTED }))),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 4 } }, "Laisse vide pour un plat maison, qui n'a pas de code."),

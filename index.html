@@ -1133,8 +1133,12 @@ function ventilationDe(a) {
     if (Array.isArray(a.ventilation) && a.ventilation.length)
         return a.ventilation.map((l) => ({ taux: Number(l.taux) || 0, ht: Number(l.ht) || 0, tgc: Number(l.tgc) || 0 }));
     const t = (a.tauxTgc === null || a.tauxTgc === undefined) ? tauxDepuisMontants(a.ht, a.tgc) : Number(a.tauxTgc);
-    return [{ taux: t === null ? 0 : t, ht: Number(a.ht) || 0, tgc: Number(a.tgc) || 0 }];
+    // Un rapport TGC/HT qui ne tombe sur aucun taux légal signale une facture
+    // à taux multiples. Afficher « 0 % » serait un mensonge : on marque la
+    // ligne comme à préciser pour qu'elle saute aux yeux.
+    return [{ taux: t === null ? null : t, ht: Number(a.ht) || 0, tgc: Number(a.tgc) || 0, aPreciser: t === null }];
 }
+function libelleTaux(l) { return l.taux === null ? "taux à préciser" : l.taux + " %"; }
 function tauxDepuisMontants(ht, tgc) {
     if (!ht || ht <= 0 || tgc === null || tgc === undefined)
         return null;
@@ -1257,7 +1261,13 @@ async function exporterAchatsExcel(achats, libelle, showToast) {
             const v = ventilationDe(a);
             const parTaux = {};
             TAUX_TGC.forEach((t) => { parTaux[t] = { ht: 0, tgc: 0 }; });
+            let aPreciser = { ht: 0, tgc: 0 };
             v.forEach((l) => {
+                if (l.taux === null) {
+                    aPreciser.ht += l.ht;
+                    aPreciser.tgc += l.tgc;
+                    return;
+                }
                 if (!parTaux[l.taux])
                     parTaux[l.taux] = { ht: 0, tgc: 0 };
                 parTaux[l.taux].ht += l.ht;
@@ -1274,6 +1284,8 @@ async function exporterAchatsExcel(achats, libelle, showToast) {
                 if (t > 0)
                     ligne["TGC " + t + " %"] = arrondi2(parTaux[t].tgc);
             });
+            ligne["Base à préciser"] = arrondi2(aPreciser.ht);
+            ligne["TGC à préciser"] = arrondi2(aPreciser.tgc);
             ligne["Total TGC"] = arrondi2(a.tgc || 0);
             ligne["Total TTC"] = arrondi2(a.ttc || 0);
             ligne["Note"] = a.note || "";
@@ -1287,6 +1299,8 @@ async function exporterAchatsExcel(achats, libelle, showToast) {
             if (t > 0)
                 total["TGC " + t + " %"] = 0;
         });
+        total["Base à préciser"] = 0;
+        total["TGC à préciser"] = 0;
         total["Total TGC"] = 0;
         total["Total TTC"] = 0;
         total["Note"] = "";
@@ -1302,7 +1316,7 @@ async function exporterAchatsExcel(achats, libelle, showToast) {
     const feuille = XLSX.utils.json_to_sheet(lignes.length ? lignes : [{ "Aucune facture": "" }]);
     const largeurs = [11, 30, 14, 12];
     TAUX_TGC.forEach((t) => { largeurs.push(11); if (t > 0) largeurs.push(11); });
-    largeurs.push(12, 12, 24);
+    largeurs.push(14, 14, 12, 12, 24);
     feuille["!cols"] = largeurs.map((w) => ({ wch: w }));
     // Fige l'en-tête : la feuille est large, on garde les titres sous les yeux.
     feuille["!freeze"] = { xSplit: 3, ySplit: 1 };
@@ -3047,7 +3061,7 @@ async function pageAchat(doc, a, premiere) {
         y += 5;
         doc.setTextColor(20, 20, 20);
         lignes.forEach((l) => {
-            doc.text("TGC " + l.taux + " %", M + 4, y);
+            doc.text(l.taux === null ? "Taux a preciser" : "TGC " + l.taux + " %", M + 4, y);
             doc.text("base " + fmtPdf(l.ht), 90, y, { align: "right" });
             doc.text(fmtPdf(l.tgc), 130, y, { align: "right" });
             y += 4.6;
@@ -3159,7 +3173,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 m.set(l.taux, e);
             });
         });
-        return Array.from(m.entries()).sort((x, y) => x[0] - y[0]);
+        return Array.from(m.entries()).sort((x, y) => (x[0] === null ? 99 : x[0]) - (y[0] === null ? 99 : y[0]));
     }, [visibles]);
     const champ = { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
     const label = { fontSize: 12, color: TEXT_MUTED };
@@ -3339,7 +3353,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         parTaux.length > 0 && React.createElement("div", { style: { borderRadius: 14, padding: 14, marginBottom: 16, background: PANEL, border: `1px solid ${LINE}` } },
             React.createElement("div", { className: "font-display", style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 10 } }, "TGC déductible par taux"),
             parTaux.map(([taux, e]) => React.createElement("div", { key: String(taux), style: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${LINE}` } },
-                React.createElement("span", { className: "tabnum", style: { width: 54, fontSize: 13, fontWeight: 600, color: ACCENT_GREEN } }, taux + " %"),
+                React.createElement("span", { className: "tabnum", style: { width: 78, fontSize: 13, fontWeight: 600, color: taux === null || taux === "null" ? "#E8B44A" : ACCENT_GREEN } }, (taux === null || taux === "null") ? "à préciser" : taux + " %"),
                 React.createElement("span", { style: { flex: 1, fontSize: 11, color: TEXT_MUTED } }, e.nb + " ligne" + (e.nb > 1 ? "s" : "")),
                 React.createElement("span", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, width: 96, textAlign: "right" } }, "base " + fmt(e.ht)),
                 React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD, width: 88, textAlign: "right" } }, fmt(e.tgc)))),
@@ -3371,8 +3385,8 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                         React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 1 } }, [shortDayLabel(a.dateKey), a.numero || null, "HT " + fmt(a.ht || 0)].filter(Boolean).join(" · ")),
                         // Le détail par taux à même la ligne : c'est l'information
                         // qu'on vient chercher, elle ne doit pas être cachée.
-                        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5, marginTop: 4 } }, ventilationDe(a).map((l, k) => React.createElement("span", { key: k, className: "tabnum", style: { padding: "2px 7px", borderRadius: 999, fontSize: 10.5, background: BG, color: l.taux === 0 ? TEXT_MUTED : ACCENT_GREEN, border: `1px solid ${LINE}` } },
-                            l.taux + " % · " + fmt(l.ht) + " → " + fmt(l.tgc))))),
+                        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5, marginTop: 4 } }, ventilationDe(a).map((l, k) => React.createElement("span", { key: k, className: "tabnum", style: { padding: "2px 7px", borderRadius: 999, fontSize: 10.5, background: BG, color: l.aPreciser ? "#E8B44A" : (l.taux === 0 ? TEXT_MUTED : ACCENT_GREEN), border: `1px solid ${l.aPreciser ? "#E8B44A" : LINE}` } },
+                            libelleTaux(l) + " · " + fmt(l.ht) + " → " + fmt(l.tgc))))),
                     React.createElement("div", { style: { textAlign: "right", flexShrink: 0 } },
                         React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(a.ttc || 0)),
                         React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, "dont " + fmt(a.tgc || 0))),

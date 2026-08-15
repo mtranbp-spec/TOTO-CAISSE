@@ -1174,6 +1174,8 @@ async function analyserParIA(fichier, surAvancement) {
         fournisseur: d.fournisseur || "",
         date: d.date || "",
         numero: d.numero || "",
+        lignes: Array.isArray(d.lignes) ? d.lignes : [],
+        ventilation: Array.isArray(d.ventilation) ? d.ventilation : [],
         ht: typeof d.ht === "number" && d.ht > 0 ? d.ht : null,
         tgc: typeof d.tgc === "number" && d.tgc > 0 ? d.tgc : null,
         ttc: typeof d.ttc === "number" && d.ttc > 0 ? d.ttc : null,
@@ -3022,76 +3024,136 @@ function dimensionsImage(dataUrl) {
     });
 }
 async function pageAchat(doc, a, premiere) {
-    const M = 12, L = 210 - M * 2;
+    const M = 12, L = 210 - M * 2, D = 210 - M;
     if (!premiere)
         doc.addPage();
     let y = M + 4;
+    // --- En-tête ---
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
+    doc.setFontSize(15);
     doc.setTextColor(20, 20, 20);
     doc.text(String(a.fournisseur || "Fournisseur inconnu"), M, y);
-    y += 7;
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setTextColor(90, 90, 90);
-    const entete = [a.dateKey ? "Date : " + shortDayLabel(a.dateKey) : null, a.numero ? "Facture n° " + a.numero : null].filter(Boolean);
-    doc.text(entete.join("     "), M, y);
-    y += 7;
+    doc.text("Justificatif d'achat — retranscription", D, y, { align: "right" });
+    y += 6;
+    doc.setFontSize(9.5);
+    doc.text([a.dateKey ? "Date : " + shortDayLabel(a.dateKey) : null, a.numero ? "Facture n° " + a.numero : null].filter(Boolean).join("     "), M, y);
+    y += 6;
     doc.setDrawColor(214, 31, 26);
     doc.setLineWidth(0.7);
-    doc.line(M, y, 210 - M, y);
+    doc.line(M, y, D, y);
     y += 7;
     doc.setTextColor(20, 20, 20);
-    doc.setFontSize(11);
-    doc.text("Total HT", M, y);
-    doc.text(fmtPdf(a.ht || 0), 78, y, { align: "right" });
-    doc.text("TGC", 95, y);
-    doc.text(fmtPdf(a.tgc || 0), 140, y, { align: "right" });
-    doc.setFont("helvetica", "bold");
-    doc.text("Total TTC", 155, y);
-    doc.text(fmtPdf(a.ttc || 0), 210 - M, y, { align: "right" });
-    doc.setFont("helvetica", "normal");
-    y += 7;
-    // Détail par taux : c'est ce que réclame la déclaration de TGC.
-    const lignes = ventilationDe(a);
+    // --- Tableau des articles ---
+    const lignes = Array.isArray(a.lignes) ? a.lignes : [];
+    const xQte = 108, xHt = 132, xTaux = 150, xTgc = 172, xTtc = D;
     if (lignes.length) {
-        doc.setFontSize(9);
-        doc.setTextColor(90, 90, 90);
-        doc.text("Détail par taux", M, y);
-        y += 5;
+        doc.setFillColor(34, 29, 26);
+        doc.rect(M, y - 5, L, 7.5, "F");
+        doc.setTextColor(243, 234, 217);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text("DÉSIGNATION", M + 2, y);
+        doc.text("QTÉ", xQte, y, { align: "right" });
+        doc.text("HT", xHt, y, { align: "right" });
+        doc.text("TGC", xTaux, y, { align: "right" });
+        doc.text("MONTANT", xTgc, y, { align: "right" });
+        doc.text("TTC", xTtc - 2, y, { align: "right" });
         doc.setTextColor(20, 20, 20);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        y += 7;
         lignes.forEach((l) => {
-            doc.text(l.taux === null ? "Taux a preciser" : "TGC " + l.taux + " %", M + 4, y);
-            doc.text("base " + fmtPdf(l.ht), 90, y, { align: "right" });
-            doc.text(fmtPdf(l.tgc), 130, y, { align: "right" });
-            y += 4.6;
+            if (y > 250) {
+                doc.addPage();
+                y = M + 12;
+            }
+            const nom = doc.splitTextToSize(String(l.designation || ""), 90);
+            doc.text(nom, M + 2, y);
+            doc.text(String(l.quantite || 1), xQte, y, { align: "right" });
+            doc.text(fmtPdf(l.ht || 0), xHt, y, { align: "right" });
+            doc.text((l.taux || 0) + " %", xTaux, y, { align: "right" });
+            doc.text(fmtPdf(l.tgc || 0), xTgc, y, { align: "right" });
+            doc.text(fmtPdf(l.ttc || 0), xTtc - 2, y, { align: "right" });
+            y += Math.max(5, nom.length * 4.2);
+            doc.setDrawColor(228, 226, 222);
+            doc.setLineWidth(0.2);
+            doc.line(M, y - 3.4, D, y - 3.4);
         });
-        doc.setFontSize(11);
-        y += 2;
+        y += 3;
     }
+    else {
+        doc.setFontSize(9);
+        doc.setTextColor(140, 140, 140);
+        doc.text("Le détail des articles n'a pas pu être lu sur cette facture.", M, y);
+        doc.setTextColor(20, 20, 20);
+        y += 7;
+    }
+    // --- Récapitulatif par taux, comme au bas d'une facture ---
+    if (y > 225) {
+        doc.addPage();
+        y = M + 12;
+    }
+    const vent = ventilationDe(a);
+    const xR = 118;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(90, 90, 90);
+    doc.text("TAUX", xR, y);
+    doc.text("BASE HT", 152, y, { align: "right" });
+    doc.text("TGC", 178, y, { align: "right" });
+    doc.text("TTC", D, y, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(20, 20, 20);
+    doc.setFontSize(9);
+    y += 4.5;
+    doc.setDrawColor(190, 190, 190);
+    doc.setLineWidth(0.2);
+    doc.line(xR, y - 2.5, D, y - 2.5);
+    vent.forEach((l) => {
+        doc.text(l.taux === null ? "à préciser" : l.taux + " %", xR, y);
+        doc.text(fmtPdf(l.ht), 152, y, { align: "right" });
+        doc.text(fmtPdf(l.tgc), 178, y, { align: "right" });
+        doc.text(fmtPdf(l.ht + l.tgc), D, y, { align: "right" });
+        y += 5;
+    });
+    doc.line(xR, y - 2.5, D, y - 2.5);
+    doc.setFont("helvetica", "bold");
+    doc.text("TOTAL", xR, y + 1.5);
+    doc.text(fmtPdf(a.ht || 0), 152, y + 1.5, { align: "right" });
+    doc.text(fmtPdf(a.tgc || 0), 178, y + 1.5, { align: "right" });
+    doc.setFillColor(214, 31, 26);
+    doc.rect(D - 32, y - 3, 32, 7, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.text(fmtPdf(a.ttc || 0), D - 2, y + 1.5, { align: "right" });
+    doc.setTextColor(20, 20, 20);
+    doc.setFont("helvetica", "normal");
+    y += 12;
     if (a.note) {
         doc.setFontSize(9);
         doc.setTextColor(90, 90, 90);
         doc.text(String(a.note).slice(0, 160), M, y);
         doc.setTextColor(20, 20, 20);
-        y += 5;
+        y += 6;
     }
-    y += 2;
+    // --- La photo d'origine, sur sa propre page : elle reste la pièce
+    //     justificative, la retranscription n'a pas valeur de preuve. ---
     if (a.photo) {
+        doc.addPage();
+        doc.setFontSize(9);
+        doc.setTextColor(90, 90, 90);
+        doc.text("Pièce d'origine — " + String(a.fournisseur || "") + (a.dateKey ? "  ·  " + shortDayLabel(a.dateKey) : ""), M, M + 4);
         const propre = await nettoyerPourPdf(a.photo);
         const dim = await dimensionsImage(propre);
-        const dispoH = 297 - y - 14;
+        const dispoH = 297 - (M + 10) - 14;
         const ratio = Math.min(L / dim.l, dispoH / dim.h);
         const w = dim.l * ratio, h = dim.h * ratio;
-        doc.addImage(propre, "JPEG", M + (L - w) / 2, y, w, h);
+        doc.addImage(propre, "JPEG", M + (L - w) / 2, M + 10, w, h);
         doc.setDrawColor(210, 210, 210);
         doc.setLineWidth(0.2);
-        doc.rect(M + (L - w) / 2, y, w, h);
-    }
-    else {
-        doc.setFontSize(10);
-        doc.setTextColor(150, 150, 150);
-        doc.text("Aucune photo enregistrée pour cette facture.", M, y + 10);
+        doc.rect(M + (L - w) / 2, M + 10, w, h);
     }
     doc.setFontSize(7.5);
     doc.setTextColor(150, 150, 150);
@@ -3187,12 +3249,13 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             tgc: String(a.tgc || ""),
             ttc: String(a.ttc || ""),
             ventilation: ventilationDe(a).map((l) => ({ taux: l.taux, ht: String(l.ht), tgc: String(l.tgc) })),
+            lignes: Array.isArray(a.lignes) ? a.lignes : [],
             note: a.note || "",
             photo: a.photo || "",
         });
     }
     function nouveau() {
-        setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], note: "", photo: "" });
+        setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], lignes: [], note: "", photo: "" });
     }
     async function surPhoto(e) {
         const f = e.target.files && e.target.files[0];
@@ -3209,7 +3272,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             showToast("⚠️ " + err.message);
             return;
         }
-        const base = { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], note: "", photo: "" };
+        const base = { fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], lignes: [], note: "", photo: "" };
         setForm({ ...base, photo: img.url });
         // On tente l'analyse en ligne, nettement plus fiable. Si le réseau ou
         // le service manque, on retombe sur la lecture locale plutôt que de
@@ -3245,7 +3308,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             const v = Array.isArray(lu.ventilation) && lu.ventilation.length
                 ? lu.ventilation.map((l) => ({ taux: Number(l.taux) || 0, ht: String(l.ht || 0), tgc: String(l.tgc || 0) }))
                 : (lu.ht ? [{ taux: tauxDepuisMontants(lu.ht, lu.tgc) || 0, ht: String(lu.ht), tgc: String(lu.tgc || 0) }] : []);
-            return { ...p, ventilation: v };
+            return { ...p, ventilation: v, lignes: Array.isArray(lu.lignes) ? lu.lignes : [] };
         });
         const trouves = [lu.ht, lu.tgc, lu.ttc].filter((x) => x !== null && x !== undefined).length;
         setAvancement(null);
@@ -3324,6 +3387,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             numero: form.numero.trim(),
             ht: n(form.ht), tgc: n(form.tgc), ttc: n(form.ttc),
             ventilation: (form.ventilation || []).map((l) => ({ taux: Number(l.taux) || 0, ht: n(l.ht), tgc: n(l.tgc) })).filter((l) => l.ht !== 0 || l.tgc !== 0),
+            lignes: (form.lignes || []).map((l) => ({ designation: String(l.designation || ""), quantite: Number(l.quantite) || 1, pu: Number(l.pu) || 0, taux: Number(l.taux) || 0, ht: Number(l.ht) || 0, tgc: Number(l.tgc) || 0, ttc: Number(l.ttc) || 0 })).filter((l) => l.designation),
             note: form.note.trim(),
             photo: form.photo || "",
             createdAt: new Date().toISOString(),
@@ -3439,6 +3503,23 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                         React.createElement("label", { style: label }, "Total TTC"),
                         React.createElement("input", { value: form.ttc, inputMode: "decimal", onChange: (e) => majMontant("ttc", e.target.value), style: { ...champ, borderColor: GOLD }, placeholder: "0" }))),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: -4, marginBottom: 10 } }, "Renseigne deux montants, le troisième se calcule."),
+                (form.lignes || []).length > 0 && React.createElement("div", null,
+                    React.createElement("label", { style: label }, "Articles lus sur la facture (" + form.lignes.length + ")"),
+                    React.createElement("div", { style: { marginTop: 6, marginBottom: 12, borderRadius: 10, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } },
+                        React.createElement("div", { style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 10, color: TEXT_MUTED, borderBottom: `1px solid ${LINE}` } },
+                            React.createElement("span", { style: { flex: 1 } }, "DÉSIGNATION"),
+                            React.createElement("span", { style: { width: 26, textAlign: "right" } }, "QTÉ"),
+                            React.createElement("span", { style: { width: 56, textAlign: "right" } }, "HT"),
+                            React.createElement("span", { style: { width: 34, textAlign: "right" } }, "TGC"),
+                            React.createElement("span", { style: { width: 48, textAlign: "right" } }, "MONT."),
+                            React.createElement("span", { style: { width: 56, textAlign: "right" } }, "TTC")),
+                        form.lignes.map((l, i) => React.createElement("div", { key: i, style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 11, borderBottom: i < form.lignes.length - 1 ? `1px solid ${LINE}` : "none" } },
+                            React.createElement("span", { style: { flex: 1, minWidth: 0, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, l.designation),
+                            React.createElement("span", { className: "tabnum", style: { width: 26, textAlign: "right", color: TEXT_MUTED } }, l.quantite),
+                            React.createElement("span", { className: "tabnum", style: { width: 56, textAlign: "right", color: TEXT_MUTED } }, fmt(l.ht || 0)),
+                            React.createElement("span", { className: "tabnum", style: { width: 34, textAlign: "right", color: ACCENT_GREEN } }, (l.taux || 0) + " %"),
+                            React.createElement("span", { className: "tabnum", style: { width: 48, textAlign: "right", color: TEXT_MUTED } }, fmt(l.tgc || 0)),
+                            React.createElement("span", { className: "tabnum", style: { width: 56, textAlign: "right", color: GOLD, fontWeight: 600 } }, fmt(l.ttc || 0)))))),
                 React.createElement("label", { style: label }, "Détail par taux de TGC"),
                 React.createElement("div", { style: { marginTop: 6, marginBottom: 10, borderRadius: 10, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } },
                     (form.ventilation || []).map((l, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderBottom: i < (form.ventilation || []).length - 1 ? `1px solid ${LINE}` : "none" } },

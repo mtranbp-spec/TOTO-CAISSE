@@ -19,6 +19,10 @@ const ORIGINES_AUTORISEES = [
 // Google retire régulièrement ses anciens modèles aux nouveaux comptes. On en
 // essaie plusieurs dans l'ordre : le premier qui répond est utilisé. Ça évite
 // de tomber en panne le jour d'une dépréciation.
+// Numéro de version renvoyé à chaque réponse : il suffit de le lire pour
+// savoir quelle version tourne réellement sur Cloudflare.
+const VERSION = "4-lignes";
+
 const MODELES = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-2.5-flash"];
 
 const CONSIGNE = `Tu analyses la photo d'une facture d'achat d'un commerce de Nouvelle-Calédonie.
@@ -29,6 +33,13 @@ Champs attendus :
   "fournisseur": string,   // raison sociale de l'émetteur, pas du client (le client est TOTO)
   "date": string,          // date de la facture au format AAAA-MM-JJ, "" si illisible
   "numero": string,        // numéro de facture, "" si absent
+  "lignes": [              // UNE ENTRÉE PAR ARTICLE figurant sur la facture
+    { "designation": string,
+      "quantite": number,  // 1 si non précisée
+      "pu": number,        // prix unitaire tel qu'imprimé, 0 si absent
+      "taux": number,      // taux de TGC de cet article : 0, 3, 6, 11 ou 22
+      "ttc": number }      // montant total TTC de la ligne
+  ],
   "ventilation": [         // UNE ENTRÉE PAR TAUX DE TGC présent sur la facture
     { "taux": number,      // 0, 3, 6, 11 ou 22
       "ht": number,        // base hors taxe soumise à ce taux
@@ -47,6 +58,13 @@ Règles :
   le tableau récapitulatif de TVA/TGC, généralement en bas de la facture, et
   rends une entrée par ligne de ce tableau.
 - Si un seul taux apparaît, la ventilation contient une seule entrée.
+- Pour les lignes d'articles : recopie la désignation telle qu'imprimée. Beaucoup
+  de tickets marquent le taux par une lettre en fin de ligne (a, b, c...) dont la
+  correspondance figure dans le tableau récapitulatif : traduis cette lettre en
+  taux réel. Exemple : « 12 x 320,00 a » avec « a 11,00% » dans le tableau donne
+  taux 11.
+- Le montant de ligne imprimé sur un ticket de caisse est presque toujours TTC.
+- Si les articles ne sont pas lisibles, rends une liste vide plutôt que d'inventer.
 - Si aucun tableau n'est lisible mais que tu as le HT et la TGC totaux, déduis
   le taux (tgc / ht × 100) et arrondis au taux légal le plus proche parmi 0, 3,
   6, 11, 22. Rends alors une entrée unique.
@@ -71,6 +89,10 @@ export default {
 
     if (requete.method === "OPTIONS")
       return new Response(null, { headers: enTetes(permise) });
+
+    // Un simple appel dans le navigateur affiche la version déployée.
+    if (requete.method === "GET")
+      return new Response(JSON.stringify({ version: VERSION, modeles: MODELES, cleConfiguree: !!env.CLE_GEMINI }), { headers: enTetes(permise) });
 
     if (requete.method !== "POST")
       return new Response(JSON.stringify({ erreur: "Méthode non autorisée" }), { status: 405, headers: enTetes(permise) });
@@ -177,6 +199,25 @@ export default {
     if (!ventilation.length && htTotal > 0)
       ventilation = [{ taux: tauxProche((tgcTotal / htTotal) * 100), ht: htTotal, tgc: tgcTotal }];
 
+    // Lignes d'articles : le montant imprimé est TTC, on en déduit HT et TGC
+    // au taux de la ligne. Une ligne sans montant n'a pas d'intérêt.
+    const lignes = (Array.isArray(extrait.lignes) ? extrait.lignes : [])
+      .map((l) => {
+        const taux = tauxProche(nombre(l && l.taux));
+        const ttc = nombre(l && l.ttc);
+        const ht = Math.round((ttc / (1 + taux / 100)) * 100) / 100;
+        return {
+          designation: String((l && l.designation) || "").slice(0, 80),
+          quantite: nombre(l && l.quantite) || 1,
+          pu: nombre(l && l.pu),
+          taux,
+          ht,
+          tgc: Math.round((ttc - ht) * 100) / 100,
+          ttc,
+        };
+      })
+      .filter((l) => l.designation && l.ttc > 0);
+
     const sommeHt = ventilation.reduce((s, l) => s + l.ht, 0);
     const sommeTgc = ventilation.reduce((s, l) => s + l.tgc, 0);
 
@@ -184,12 +225,14 @@ export default {
       fournisseur: String(extrait.fournisseur || "").slice(0, 80),
       date: String(extrait.date || ""),
       numero: String(extrait.numero || "").slice(0, 40),
+      lignes,
       ventilation,
       ht: htTotal || Math.round(sommeHt * 100) / 100,
       tgc: tgcTotal || Math.round(sommeTgc * 100) / 100,
       ttc: nombre(extrait.ttc) || Math.round((sommeHt + sommeTgc) * 100) / 100,
       confiance: nombre(extrait.confiance),
       modele: modeleUtilise,
+      version: VERSION,
     }), { headers: enTetes(permise) });
   },
 };

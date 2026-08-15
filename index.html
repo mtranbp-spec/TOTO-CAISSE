@@ -303,6 +303,8 @@ const Icon = {
     Doc: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
         React.createElement("path", { d: "M14 2v6h6M8 13h8M8 17h5", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Code: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M3 5v14M6.5 5v14M10 5v10M13.5 5v14M17 5v10M20.5 5v14", stroke: p.color || "#fff", strokeWidth: "1.6", strokeLinecap: "round" })),
     Loupe: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("circle", { cx: "11", cy: "11", r: "7", stroke: p.color || "#fff", strokeWidth: "2" }),
         React.createElement("path", { d: "m20 20-3.6-3.6", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
@@ -2171,15 +2173,16 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
     const [catLibre, setCatLibre] = useState(false);
     const [recherche, setRecherche] = useState("");
     const [confirmSuppr, setConfirmSuppr] = useState(false);
-    const carteProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) openEditProduct(p); }, style: { width: "100%", height: "100%", minHeight: 64, display: "flex", alignItems: "center", gap: 12, textAlign: "left", borderRadius: 12, padding: "12px 14px", background: PANEL, border: `1px solid ${LINE}` } },
-        React.createElement("div", { style: { width: 8, height: 34, borderRadius: 999, flexShrink: 0, background: catColor(p.category) } }),
-        React.createElement("div", { style: { flex: 1, minWidth: 0 } },
-            React.createElement("div", { className: "toto-nom2", style: { fontSize: 14, fontWeight: 500, color: TEXT } }, p.name),
-            React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED } },
-                p.category,
-                " \u00B7 marge ",
-                fmt(p.price - (p.cost || 0)))),
-        React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(p.price)));
+    // Même anatomie que les tuiles de la Caisse : barre de couleur, nom sur
+    // deux lignes, prix en bas. On y ajoute la marge, utile seulement ici.
+    const carteProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) openEditProduct(p); }, className: "toto-carte", style: { width: "100%", height: "100%", minHeight: 146, textAlign: "left", borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` } },
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexShrink: 0 } },
+            React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, background: catColor(p.category) } }),
+            p.ean ? React.createElement(Icon.Code, { size: 12, color: TEXT_MUTED }) : null),
+        React.createElement("div", { className: "font-display toto-nom2", style: { fontSize: 15, marginBottom: 6, color: TEXT } }, p.name),
+        React.createElement("div", { className: "toto-carte-prix" },
+            React.createElement("div", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, marginBottom: 2 } }, "marge " + fmt(p.price - (p.cost || 0))),
+            React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))));
     // On rouvre toujours le formulaire produit sur les pastilles. Le champ
     // libre ne réapparaît que si la catégorie du produit n'existe plus.
     useEffect(() => { setCatLibre(false); setConfirmSuppr(false); }, [editing]);
@@ -2318,14 +2321,14 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                     items: g.produits,
                     active: reorder,
                     onReorder: reorderProducts,
-                    gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, alignItems: "stretch" },
+                    gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, alignItems: "stretch" },
                     renderItem: carteProduit,
                 }))))
             : React.createElement(ReorderGrid, {
                 items: visibleProducts,
                 active: reorder,
                 onReorder: reorderProducts,
-                gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8, alignItems: "stretch" },
+                gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, alignItems: "stretch" },
                 renderItem: carteProduit,
             }),
         editing && (React.createElement("div", { onClick: closeForm, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16, background: "rgba(0,0,0,0.5)" } },

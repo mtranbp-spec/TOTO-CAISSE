@@ -3071,7 +3071,9 @@ async function pdfAchats(liste, nomFichier, showToast) {
 }
 /* ---------- Onglet Achats ---------- */
 function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
-    const [periode, setPeriode] = useState("1m");
+    // Une facture se photographie souvent des semaines après son émission :
+    // une fenêtre d'un an évite de croire qu'elle ne s'est pas enregistrée.
+    const [periode, setPeriode] = useState("1a");
     const [form, setForm] = useState(null);
     const [avancement, setAvancement] = useState(null);
     const [aSupprimer, setASupprimer] = useState(null);
@@ -3082,7 +3084,16 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         const def = PERIODES.find((x) => x.cle === periode) || PERIODES[2];
         const depuis = def.jours === null ? null : new Date(Date.now() - def.jours * 86400000);
         return achats
-            .filter((a) => !depuis || (a.dateKey && new Date(a.dateKey + "T12:00:00") >= depuis))
+            .filter((a) => {
+                if (!depuis)
+                    return true;
+                const d = a.dateKey ? new Date(a.dateKey + "T12:00:00") : null;
+                // Une date absente ou illisible ne doit jamais escamoter une
+                // facture : on la garde plutôt que de la perdre en silence.
+                if (!d || isNaN(d))
+                    return true;
+                return d >= depuis;
+            })
             .sort((a, b) => String(b.dateKey).localeCompare(String(a.dateKey)));
     }, [achats, periode]);
     const totaux = useMemo(() => visibles.reduce((t, a) => ({
@@ -3241,7 +3252,14 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             React.createElement(KpiCard, { label: "Factures", value: String(visibles.length), color: TEXT })),
         React.createElement("div", { style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, overflow: "hidden" } },
             visibles.length === 0
-                ? React.createElement("div", { style: { fontSize: 13, color: TEXT_MUTED, textAlign: "center", padding: "40px 0" } }, "Aucun achat sur cette période.")
+                ? React.createElement("div", { style: { textAlign: "center", padding: "34px 16px" } },
+                    React.createElement("div", { style: { fontSize: 13, color: TEXT_MUTED } }, "Aucun achat sur cette période."),
+                    // Sans ce rappel, une facture datée hors fenêtre donne
+                    // l'impression de ne pas s'être enregistrée.
+                    achats.length > 0 && React.createElement("div", { style: { marginTop: 12 } },
+                        React.createElement("div", { style: { fontSize: 12, color: GOLD, marginBottom: 10 } },
+                            achats.length + " facture" + (achats.length > 1 ? "s" : "") + " enregistrée" + (achats.length > 1 ? "s" : "") + " en dehors de cette période"),
+                        React.createElement("button", { onClick: () => setPeriode("max"), style: { padding: "9px 16px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: ACCENT, color: "#fff" } }, "Tout afficher")))
                 : visibles.map((a) => React.createElement("div", { key: a.id, style: { display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderBottom: `1px solid ${LINE}` } },
                     a.photo
                         ? React.createElement("button", { onClick: () => setApercuPhoto(a), title: "Voir la facture", style: { width: 34, height: 34, borderRadius: 8, flexShrink: 0, padding: 0, overflow: "hidden", border: `1px solid ${LINE}`, background: BG } },

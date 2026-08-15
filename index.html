@@ -344,6 +344,11 @@ async function chargerLogo() {
 // (U+202F) que les polices standard du PDF rendent comme une barre oblique :
 // « 45 000 F » devenait « 45/000 F ». On la remplace par une espace normale.
 // Comparaison souple : « the glace » doit trouver « Thé Glacé ».
+// Les codes-barres sont comparés sans espaces et en majuscules : une douchette
+// mal réglée peut renvoyer des minuscules, et un code reste le même code.
+function normaliserEan(t) {
+    return String(t || "").replace(/\s/g, "").toUpperCase();
+}
 function normaliser(t) {
     return String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
@@ -1790,8 +1795,8 @@ function App() {
     // Renvoie true si le code correspond à un produit : le scanner par caméra
     // s'en sert pour décider s'il se ferme ou s'il attend un autre essai.
     function scanner(code) {
-        const propre = String(code).replace(/\s/g, "");
-        const p = products.find((x) => x.ean && String(x.ean).replace(/\s/g, "") === propre);
+        const propre = normaliserEan(code);
+        const p = products.find((x) => x.ean && normaliserEan(x.ean) === propre);
         if (!p) {
             showToast("Code inconnu : " + propre);
             return false;
@@ -1881,9 +1886,9 @@ function App() {
         }
         // Un code-barres ne peut désigner qu'un seul produit : sinon le scan
         // deviendrait ambigu au moment de l'encaissement.
-        const eanPropre = String(form.ean || "").replace(/\s/g, "");
+        const eanPropre = normaliserEan(form.ean);
         if (eanPropre) {
-            const occupe = products.find((p) => p.ean && String(p.ean).replace(/\s/g, "") === eanPropre && p.id !== editing);
+            const occupe = products.find((p) => p.ean && normaliserEan(p.ean) === eanPropre && p.id !== editing);
             if (occupe) {
                 setFormError("Ce code-barres est déjà utilisé par « " + occupe.name + " ».");
                 return;
@@ -2042,7 +2047,7 @@ function App() {
                             React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
                             cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
         camera && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: false, onFermer: () => setCamera(false), onCode: (code) => scanner(code) }),
-        cameraEan && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: true, titre: "Scanne l'article pour enregistrer son code", onFermer: () => setCameraEan(false), onCode: (code) => { setFormError(null); setForm((f) => ({ ...f, ean: String(code).replace(/\s/g, "") })); showToast("Code lu : " + code); return true; } }),
+        cameraEan && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: true, titre: "Scanne l'article pour enregistrer son code", onFermer: () => setCameraEan(false), onCode: (code) => { setFormError(null); setForm((f) => ({ ...f, ean: normaliserEan(code) })); showToast("Code lu : " + code); return true; } }),
         nouveauVendeur !== null && React.createElement("div", { onClick: () => setNouveauVendeur(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
             React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Nouveau vendeur"),
@@ -2370,7 +2375,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                 })(),
                 React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "Code-barres (EAN)"),
                 React.createElement("div", { style: { position: "relative", marginTop: 4 } },
-                    React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: e.target.value }); }, style: { width: "100%", padding: "10px 12px", paddingRight: 46, borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, inputMode: "numeric", placeholder: "Clique ici puis scanne l'article" }),
+                    React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: normaliserEan(e.target.value) }); }, autoCapitalize: "characters", autoCorrect: "off", spellCheck: false, style: { width: "100%", padding: "10px 12px", paddingRight: 46, borderRadius: 8, fontSize: 14, letterSpacing: 1, textTransform: "uppercase", background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, placeholder: "Clique ici puis scanne l'article" }),
                     React.createElement("button", { onClick: ouvrirCameraEan, title: "Scanner avec l'appareil photo", className: "toto-cam-mobile", style: { position: "absolute", right: 5, top: 5, width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
                         React.createElement(Icon.Camera, { size: 15, color: TEXT_MUTED }))),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 4 } }, "Laisse vide pour un plat maison, qui n'a pas de code."),

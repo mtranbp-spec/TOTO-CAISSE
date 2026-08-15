@@ -40,6 +40,11 @@
   /* Sur téléphone, la navigation passe en barre basse : c'est là que le pouce
      tombe naturellement. Les !important sont nécessaires pour l'emporter sur
      les styles en ligne des composants. */
+  /* Barre de catégories : pas d'ascenseur visible, et la souris peut la
+     tirer comme un doigt sur un téléphone. */
+  .toto-barre-glisse { scrollbar-width: none; -ms-overflow-style: none; cursor: grab; user-select: none; }
+  .toto-barre-glisse::-webkit-scrollbar { display: none; height: 0; }
+
   /* Le nom occupe toujours deux lignes, remplies ou non : sans cela les
      tuiles d'une même rangée avaient des hauteurs différentes. Au-delà, le
      texte est coupé par des points de suspension. */
@@ -1365,6 +1370,7 @@ function App() {
     const [factureEditee, setFactureEditee] = useState(null);
     const [prixEnEdition, setPrixEnEdition] = useState(null);
     const [camera, setCamera] = useState(false);
+    const [recherchePos, setRecherchePos] = useState("");
     const [cameraEan, setCameraEan] = useState(false);
     const toastTimer = useRef(null);
     useEffect(() => {
@@ -1582,16 +1588,21 @@ function App() {
         if (change)
             batch.commit().catch(() => showToast("⚠️ Ordre non enregistré — pas de connexion."));
     }
-    const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? orderedProducts : orderedProducts.filter((p) => p.category === activeCategory)), [orderedProducts, activeCategory]);
+    // La recherche prime sur la catégorie : on cherche dans toute la carte.
+    const produitsFiltres = useMemo(() => {
+        const n = normaliser(recherchePos);
+        return n ? orderedProducts.filter((p) => normaliser(p.name).indexOf(n) !== -1) : orderedProducts;
+    }, [orderedProducts, recherchePos]);
+    const visibleProducts = useMemo(() => (activeCategory === "Toutes" || recherchePos ? produitsFiltres : produitsFiltres.filter((p) => p.category === activeCategory)), [produitsFiltres, activeCategory, recherchePos]);
     // Une section par catégorie, dans l'ordre que tu as choisi. Les catégories
     // vides sont omises : une entête sans produit ne ferait qu'allonger la page.
     const groupesProduits = useMemo(() => {
-        const g = categories.map((nom) => ({ nom, produits: orderedProducts.filter((p) => p.category === nom) })).filter((x) => x.produits.length > 0);
-        const orphelins = orderedProducts.filter((p) => !p.category || categories.indexOf(p.category) === -1);
+        const g = categories.map((nom) => ({ nom, produits: produitsFiltres.filter((p) => p.category === nom) })).filter((x) => x.produits.length > 0);
+        const orphelins = produitsFiltres.filter((p) => !p.category || categories.indexOf(p.category) === -1);
         if (orphelins.length)
             g.push({ nom: "Sans catégorie", produits: orphelins });
         return g;
-    }, [categories, orderedProducts]);
+    }, [categories, produitsFiltres]);
     const tuileProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) addToCart(p); }, className: "toto-carte", style: { width: "100%", height: "100%", minHeight: 132, textAlign: "left", borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` } },
         React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 10, flexShrink: 0, background: colorOf(p.category) } }),
         React.createElement("div", { className: "font-display toto-nom2", style: { fontSize: 15, marginBottom: 8, color: TEXT } }, p.name),
@@ -1928,7 +1939,7 @@ function App() {
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
         view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
-                React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
+                React.createElement(BarreDefilante, { actif: !reorderPos, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
                     React.createElement(ReorderGrid, {
                         items: categories.map((c) => ({ id: c })),
@@ -1937,7 +1948,7 @@ function App() {
                         gridStyle: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
                         renderItem: (it, rangement) => React.createElement(CategoryTab, { label: it.id, active: activeCategory === it.id, color: colorOf(it.id), onClick: () => { if (!rangement) setActiveCategory(it.id); } }),
                     }),
-                    React.createElement(RechercheProduits, { produits: orderedProducts, colorOf: colorOf, onChoisir: (p) => addToCart(p) }),
+                    React.createElement(RechercheProduits, { q: recherchePos, setQ: setRecherchePos, nbResultats: visibleProducts.length }),
                     React.createElement("button", { onClick: () => setCamera(true), title: "Scanner avec l'appareil photo", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
                         React.createElement(Icon.Camera, { size: 14, color: TEXT_MUTED }),
                         "Scanner"),
@@ -1945,7 +1956,7 @@ function App() {
                 // En vue « Toutes », on empile une section par catégorie plutôt
                 // qu'une grille unique : en plein service, l'intertitre coloré
                 // évite de lire chaque nom pour retrouver un plat.
-                activeCategory === "Toutes"
+                activeCategory === "Toutes" && !recherchePos
                     ? React.createElement("div", null, groupesProduits.map((g) => React.createElement("div", { key: g.nom, style: { marginBottom: 22 } },
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 } },
                             React.createElement("span", { style: { width: 10, height: 10, borderRadius: 999, flexShrink: 0, background: colorOf(g.nom) } }),
@@ -2150,6 +2161,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
     const [confirmPin, setConfirmPin] = useState(null); // saisie du code avant suppression
     const [reorder, setReorder] = useState(false);
     const [catLibre, setCatLibre] = useState(false);
+    const [recherche, setRecherche] = useState("");
     // On rouvre toujours le formulaire produit sur les pastilles. Le champ
     // libre ne réapparaît que si la catégorie du produit n'existe plus.
     useEffect(() => { setCatLibre(false); }, [editing]);
@@ -2227,7 +2239,11 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
         if (activeCategory !== "Toutes" && !categories.includes(activeCategory))
             setActiveCategory("Toutes");
     }, [categories, activeCategory]);
-    const visibleProducts = useMemo(() => (activeCategory === "Toutes" ? products : products.filter((p) => p.category === activeCategory)), [products, activeCategory]);
+    const visibleProducts = useMemo(() => {
+        const n = normaliser(recherche);
+        const base = n ? products.filter((p) => normaliser(p.name).indexOf(n) !== -1) : products;
+        return (activeCategory === "Toutes" || n) ? base : base.filter((p) => p.category === activeCategory);
+    }, [products, activeCategory, recherche]);
     return (React.createElement("div", { style: { padding: 20 } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
             React.createElement("span", { className: "font-display", style: { fontSize: 18, color: TEXT } },
@@ -2237,7 +2253,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
             React.createElement("button", { onClick: openNewProduct, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" } },
                 React.createElement(Icon.Plus, { size: 15 }),
                 " Nouveau produit")),
-        React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
+        React.createElement(BarreDefilante, { actif: !reorder, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
             React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
             React.createElement(ReorderGrid, {
                 items: categories.map((c) => ({ id: c })),
@@ -2259,7 +2275,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                             : React.createElement("span", { style: { paddingRight: 12 } }));
                 },
             }),
-            React.createElement(RechercheProduits, { produits: products, colorOf: catColor, onChoisir: (p) => openEditProduct(p) }),
+            React.createElement(RechercheProduits, { q: recherche, setQ: setRecherche, nbResultats: visibleProducts.length }),
             React.createElement("button", { onClick: () => openCatForm(null), title: "Nouvelle catégorie", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
                 React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }),
                 "Catégorie"),
@@ -2581,17 +2597,12 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote, deleteQuot
                 React.createElement("button", { onClick: () => { const d = aSupprimer; setASupprimer(null); deleteQuote(d.id).then(() => showToast("Devis " + d.numero + " supprimé")).catch((e) => showToast("⚠️ " + (e.message || "Suppression impossible"))); }, className: "font-display", style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "#C2352A", color: "#fff" } }, "Supprimer définitivement"),
                 React.createElement("button", { onClick: () => setASupprimer(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler")))));
 }
-/* ---------- Recherche repliée derrière une loupe ---------- */
-function RechercheProduits({ produits, colorOf, onChoisir, libelleAction }) {
+/* ---------- Recherche repliée derrière une loupe ----------
+   Le champ ne propose plus de liste : il filtre la grille elle-même, les
+   produits disparaissent à mesure que l'on tape. */
+function RechercheProduits({ q, setQ, nbResultats }) {
     const [ouvert, setOuvert] = useState(false);
-    const [q, setQ] = useState("");
     const champ = useRef(null);
-    const resultats = useMemo(() => {
-        const n = normaliser(q);
-        if (!n)
-            return [];
-        return produits.filter((p) => normaliser(p.name).indexOf(n) !== -1).slice(0, 8);
-    }, [produits, q]);
     useEffect(() => {
         if (ouvert && champ.current)
             champ.current.focus();
@@ -2605,27 +2616,72 @@ function RechercheProduits({ produits, colorOf, onChoisir, libelleAction }) {
         }
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [ouvert]);
-    function fermer() {
-        setQ("");
-        setOuvert(false);
-    }
+    }, [ouvert, setQ]);
     if (!ouvert)
         return React.createElement("button", { onClick: () => setOuvert(true), title: "Rechercher un produit", style: { flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 999, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
             React.createElement(Icon.Loupe, { size: 15, color: TEXT_MUTED }));
-    return React.createElement("div", { style: { position: "relative", flex: 1, minWidth: 190 } },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, padding: "0 8px 0 12px", borderRadius: 999, background: PANEL, border: `1px solid ${ACCENT}` } },
-            React.createElement(Icon.Loupe, { size: 15, color: ACCENT }),
-            React.createElement("input", { ref: champ, value: q, onChange: (e) => setQ(e.target.value), placeholder: "Nom du produit…", style: { flex: 1, minWidth: 0, padding: "9px 0", fontSize: 14, background: "transparent", color: TEXT, border: "none", outline: "none" } }),
-            React.createElement("button", { onClick: fermer, title: "Fermer la recherche (Échap)", style: { width: 26, height: 26, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
-                React.createElement(Icon.X, { size: 13, color: TEXT_MUTED }))),
-        // La liste flotte au-dessus de la grille : elle ne doit pas décaler
-        // les produits pendant la frappe.
-        resultats.length > 0 && React.createElement("div", { style: { position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, borderRadius: 12, background: PANEL, border: `1px solid ${LINE}`, boxShadow: "0 12px 28px rgba(0,0,0,0.5)", overflow: "hidden" } }, resultats.map((p, i) => React.createElement("button", { key: p.id, onClick: () => { onChoisir(p); setQ(""); }, style: { display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 12px", background: "transparent", borderBottom: i < resultats.length - 1 ? `1px solid ${LINE}` : "none" } },
-            React.createElement("span", { style: { width: 6, height: 24, borderRadius: 999, flexShrink: 0, background: colorOf(p.category) } }),
-            React.createElement("span", { style: { flex: 1, fontSize: 13, color: TEXT } }, p.name),
-            React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD } }, fmt(p.price))))),
-        q && resultats.length === 0 && React.createElement("div", { style: { position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, padding: "10px 12px", borderRadius: 12, background: PANEL, border: `1px solid ${LINE}`, fontSize: 12, color: TEXT_MUTED } }, "Aucun produit ne correspond."));
+    return React.createElement("div", { style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, minWidth: 210, padding: "0 8px 0 12px", borderRadius: 999, background: PANEL, border: `1px solid ${ACCENT}` } },
+        React.createElement(Icon.Loupe, { size: 15, color: ACCENT }),
+        React.createElement("input", { ref: champ, value: q, onChange: (e) => setQ(e.target.value), placeholder: "Filtrer les produits…", style: { flex: 1, minWidth: 0, padding: "9px 0", fontSize: 14, background: "transparent", color: TEXT, border: "none", outline: "none" } }),
+        q && React.createElement("span", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, whiteSpace: "nowrap" } }, nbResultats),
+        React.createElement("button", { onClick: () => { setQ(""); setOuvert(false); }, title: "Fermer la recherche (Échap)", style: { width: 26, height: 26, borderRadius: 999, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
+            React.createElement(Icon.X, { size: 13, color: TEXT_MUTED })));
+}
+/* ---------- Barre horizontale : glisser à la souris comme au doigt ---------- */
+function BarreDefilante({ children, actif, style }) {
+    const zone = useRef(null);
+    useEffect(() => {
+        const el = zone.current;
+        if (!el || actif === false)
+            return;
+        let appuye = false, xDepart = 0, scrollDepart = 0, aGlisse = false;
+        function onDown(e) {
+            // Le doigt fait déjà défiler nativement : on ne s'occupe que de la souris.
+            if (e.pointerType !== "mouse")
+                return;
+            appuye = true;
+            aGlisse = false;
+            xDepart = e.clientX;
+            scrollDepart = el.scrollLeft;
+        }
+        function onMove(e) {
+            if (!appuye)
+                return;
+            const dx = e.clientX - xDepart;
+            if (!aGlisse && Math.abs(dx) > 4) {
+                aGlisse = true;
+                el.style.cursor = "grabbing";
+            }
+            if (aGlisse) {
+                el.scrollLeft = scrollDepart - dx;
+                e.preventDefault();
+            }
+        }
+        function onUp() {
+            appuye = false;
+            el.style.cursor = "";
+            // On laisse le clic passer s'il n'y a pas eu de glissement, sinon
+            // tirer la barre changerait aussi de catégorie.
+            setTimeout(() => { aGlisse = false; }, 0);
+        }
+        function onClick(e) {
+            if (aGlisse) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }
+        el.addEventListener("pointerdown", onDown);
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        el.addEventListener("click", onClick, true);
+        return () => {
+            el.removeEventListener("pointerdown", onDown);
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            el.removeEventListener("click", onClick, true);
+        };
+    }, [actif]);
+    return React.createElement("div", { ref: zone, className: "toto-barre-glisse", style: style }, children);
 }
 /* ---------- Onglet Achats ---------- */
 function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {

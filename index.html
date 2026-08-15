@@ -1129,6 +1129,12 @@ function analyserFacture(texte) {
 const URL_ANALYSE = "https://jolly-morning-19b6.mtranbp.workers.dev/";
 // Le taux se déduit du rapport TGC / HT, puis on le cale sur le taux légal le
 // plus proche : une facture arrondie au franc ne donne jamais 22,000 % pile.
+// Identifiant d'une facture d'achat. Une part d'aléatoire en plus de
+// l'horodatage : deux enregistrements dans la même milliseconde ne doivent pas
+// s'écraser l'un l'autre.
+function nouvelIdAchat() {
+    return "a" + Date.now() + Math.random().toString(36).slice(2, 6);
+}
 // Toute facture est ramenée à une liste de lignes { taux, ht, tgc }. Les
 // anciennes fiches, qui ne portaient qu'un taux unique, sont converties à la
 // volée pour que rien ne soit perdu ni affiché différemment.
@@ -1798,9 +1804,10 @@ function App() {
         const db = getDb();
         if (!db)
             return Promise.reject(new Error("Pas de connexion."));
-        // Un identifiant fourni signifie une correction, pas une nouvelle
-        // facture : sans ça, modifier créerait un doublon.
-        return db.collection("achats").doc(id || ("a" + Date.now())).set(a);
+        // L'identifiant est décidé à l'ouverture de la fiche, pas au moment de
+        // l'écriture. Réappuyer sur Enregistrer réécrit donc le même document
+        // au lieu d'en créer un second — l'opération devient sans risque.
+        return db.collection("achats").doc(id || nouvelIdAchat()).set(a);
     }
     function deleteAchat(id) {
         const db = getDb();
@@ -3199,6 +3206,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     const [avancement, setAvancement] = useState(null);
     const [aSupprimer, setASupprimer] = useState(null);
     const [apercuPhoto, setApercuPhoto] = useState(null);
+    const [enregistrement, setEnregistrement] = useState(false);
     const fichier = useRef(null);
     const fournisseursConnus = useMemo(() => Array.from(new Set(achats.map((a) => a.fournisseur).filter(Boolean))).sort(), [achats]);
     const visibles = useMemo(() => {
@@ -3220,6 +3228,23 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     const totaux = useMemo(() => visibles.reduce((t, a) => ({
         ht: t.ht + (a.ht || 0), tgc: t.tgc + (a.tgc || 0), ttc: t.ttc + (a.ttc || 0),
     }), { ht: 0, tgc: 0, ttc: 0 }), [visibles]);
+    // Repérage des doublons : même fournisseur, même date, même TTC. C'est la
+    // signature d'une facture enregistrée deux fois, par exemple après un
+    // double appui sur Enregistrer.
+    const doublons = useMemo(() => {
+        const m = new Map();
+        visibles.forEach((a) => {
+            const cle = normaliser(a.fournisseur) + "|" + (a.dateKey || "") + "|" + Math.round(a.ttc || 0);
+            m.set(cle, (m.get(cle) || 0) + 1);
+        });
+        const suspects = new Set();
+        visibles.forEach((a) => {
+            const cle = normaliser(a.fournisseur) + "|" + (a.dateKey || "") + "|" + Math.round(a.ttc || 0);
+            if (m.get(cle) > 1)
+                suspects.add(a.id);
+        });
+        return suspects;
+    }, [visibles]);
     // HT par catégorie comptable : c'est ce que réclame la déclaration. Une
     // facture dont les articles n'ont pas été lus est rangée dans « Non
     // ventilé » plutôt que d'être oubliée du calcul.
@@ -3280,7 +3305,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         });
     }
     function nouveau() {
-        setForm({ fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], lignes: [], note: "", photo: "" });
+        setForm({ idPrevu: nouvelIdAchat(), fournisseur: "", dateKey: todayKey(), numero: "", ht: "", tgc: "", ttc: "", ventilation: [], lignes: [], note: "", photo: "" });
     }
     // Analyse d'une photo : renvoie la fiche prête à enregistrer, ou null.
     async function analyserUne(f, avancer) {
@@ -3341,6 +3366,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 return;
             }
             setForm({
+                idPrevu: nouvelIdAchat(),
                 fournisseur: fiche.fournisseur, dateKey: fiche.dateKey, numero: fiche.numero,
                 ht: String(fiche.ht || ""), tgc: String(fiche.tgc || ""), ttc: String(fiche.ttc || ""),
                 ventilation: fiche.ventilation.map((l) => ({ taux: l.taux, ht: String(l.ht), tgc: String(l.tgc) })),
@@ -3443,6 +3469,10 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
         });
     }
     function enregistrer() {
+        // Verrou : sans lui, un appui répété pendant une écriture lente créait
+        // autant de factures que de pressions.
+        if (enregistrement)
+            return;
         const n = (x) => { const v = parseFloat(String(x).replace(",", ".")); return isNaN(v) ? 0 : v; };
         if (!form.fournisseur.trim()) {
             showToast("Indique le fournisseur.");
@@ -3464,9 +3494,11 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             createdAt: new Date().toISOString(),
         };
         a.aVerifier = false;
-        saveAchat(a, form.id)
+        setEnregistrement(true);
+        saveAchat(a, form.id || form.idPrevu)
             .then(() => { showToast(form.id ? "Facture corrigée" : "Achat enregistré"); setForm(null); })
-            .catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible")));
+            .catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible")))
+            .then(() => setEnregistrement(false));
     }
     return (React.createElement("div", { style: { padding: 20, maxWidth: 820, margin: "0 auto" } },
         React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 } },
@@ -3507,6 +3539,10 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             React.createElement(KpiCard, { label: "TGC déductible", value: fmt(totaux.tgc), color: ACCENT_GREEN }),
             React.createElement(KpiCard, { label: "Total TTC", value: fmt(totaux.ttc), color: GOLD }),
             React.createElement(KpiCard, { label: "Factures", value: String(visibles.length), color: TEXT })),
+        doublons.size > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 12, borderRadius: 12, background: "rgba(194,53,42,0.12)", border: "1px solid #C2352A" } },
+            React.createElement("span", { style: { flex: 1, fontSize: 12, color: "#E86A5C" } },
+                doublons.size + " factures identiques — même fournisseur, même date, même montant"),
+            React.createElement("span", { style: { fontSize: 11, color: TEXT_MUTED } }, "Supprime les copies en trop")),
         visibles.filter((a) => a.aVerifier).length > 0 && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 14, borderRadius: 12, background: "rgba(232,180,74,0.1)", border: "1px solid #E8B44A" } },
             React.createElement("span", { style: { flex: 1, fontSize: 12, color: "#E8B44A" } },
                 visibles.filter((a) => a.aVerifier).length + " facture" + (visibles.filter((a) => a.aVerifier).length > 1 ? "s" : "") + " à vérifier — lecture incertaine ou montant manquant"),
@@ -3529,7 +3565,8 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                     React.createElement("button", { onClick: () => modifier(a), title: "Ouvrir pour vérifier ou corriger", style: { flex: 1, minWidth: 0, textAlign: "left", padding: 0, background: "transparent" } },
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
                             React.createElement("span", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.fournisseur || "Fournisseur à saisir"),
-                            a.aVerifier && React.createElement("span", { style: { flexShrink: 0, padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 600, background: "rgba(232,180,74,0.15)", color: "#E8B44A", border: "1px solid #E8B44A" } }, "À VÉRIFIER")),
+                            a.aVerifier && React.createElement("span", { style: { flexShrink: 0, padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 600, background: "rgba(232,180,74,0.15)", color: "#E8B44A", border: "1px solid #E8B44A" } }, "À VÉRIFIER"),
+                            doublons.has(a.id) && React.createElement("span", { style: { flexShrink: 0, padding: "1px 6px", borderRadius: 999, fontSize: 9.5, fontWeight: 600, background: "rgba(194,53,42,0.15)", color: "#E86A5C", border: "1px solid #C2352A" } }, "DOUBLON ?")),
                         React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 1 } }, [shortDayLabel(a.dateKey), a.numero || null, "HT " + fmt(a.ht || 0)].filter(Boolean).join(" · ")),
                         // Le détail par taux à même la ligne : c'est l'information
                         // qu'on vient chercher, elle ne doit pas être cachée.
@@ -3661,7 +3698,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 })(),
                 React.createElement("label", { style: label }, "Note"),
                 React.createElement("input", { value: form.note, onChange: (e) => setForm({ ...form, note: e.target.value }), style: champ, placeholder: "Facultatif" }),
-                React.createElement("button", { onClick: enregistrer, className: "font-display", style: { width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, form.id ? "Enregistrer les corrections" : "Enregistrer l'achat")))));
+                React.createElement("button", { onClick: enregistrer, disabled: enregistrement, className: "font-display", style: { width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: enregistrement ? LINE : ACCENT_GREEN, color: enregistrement ? TEXT_MUTED : "#fff" } }, enregistrement ? "Enregistrement…" : (form.id ? "Enregistrer les corrections" : "Enregistrer l'achat"))))));
 }
 /* ---------- Écran de connexion (PIN partagé) ---------- */
 function LoginView() {

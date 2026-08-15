@@ -21,7 +21,7 @@ const ORIGINES_AUTORISEES = [
 // de tomber en panne le jour d'une dépréciation.
 // Numéro de version renvoyé à chaque réponse : il suffit de le lire pour
 // savoir quelle version tourne réellement sur Cloudflare.
-const VERSION = "4-lignes";
+const VERSION = "5-categories";
 
 const MODELES = ["gemini-3.6-flash", "gemini-3.7-flash", "gemini-2.5-flash"];
 
@@ -38,7 +38,8 @@ Champs attendus :
       "quantite": number,  // 1 si non précisée
       "pu": number,        // prix unitaire tel qu'imprimé, 0 si absent
       "taux": number,      // taux de TGC de cet article : 0, 3, 6, 11 ou 22
-      "ttc": number }      // montant total TTC de la ligne
+      "ttc": number,       // montant total TTC de la ligne
+      "categorie": string }// une seule valeur parmi la liste ci-dessous
   ],
   "ventilation": [         // UNE ENTRÉE PAR TAUX DE TGC présent sur la facture
     { "taux": number,      // 0, 3, 6, 11 ou 22
@@ -64,6 +65,17 @@ Règles :
   taux réel. Exemple : « 12 x 320,00 a » avec « a 11,00% » dans le tableau donne
   taux 11.
 - Le montant de ligne imprimé sur un ticket de caisse est presque toujours TTC.
+- Classe chaque article dans EXACTEMENT une de ces catégories comptables :
+  "Boisson"          : sodas, eaux, jus, bières, sirops, boissons énergisantes
+  "Matière première" : ingrédients entrant dans les plats — viande, poisson,
+                       légumes, riz, farine, épices, huile, produits frais
+  "Emballage"        : barquettes, sacs, couverts jetables, film, papier
+  "Entretien"        : produits ménagers, éponges, gants, sacs poubelle
+  "Matériel"         : équipement durable, ustensiles, mobilier, électroménager
+  "Service"          : prestations, transport, abonnements, réparations
+  "Autre"            : tout ce qui n'entre nulle part ailleurs
+  Dans le doute entre matière première et autre chose, privilégie le rôle de
+  l'article dans un commerce de plats à emporter.
 - Si les articles ne sont pas lisibles, rends une liste vide plutôt que d'inventer.
 - Si aucun tableau n'est lisible mais que tu as le HT et la TGC totaux, déduis
   le taux (tgc / ht × 100) et arrondis au taux légal le plus proche parmi 0, 3,
@@ -206,7 +218,11 @@ export default {
         const taux = tauxProche(nombre(l && l.taux));
         const ttc = nombre(l && l.ttc);
         const ht = Math.round((ttc / (1 + taux / 100)) * 100) / 100;
+        const cats = ["Boisson", "Matière première", "Emballage", "Entretien", "Matériel", "Service", "Autre"];
+        const brutCat = String((l && l.categorie) || "").trim();
+        const cat = cats.find((c) => c.toLowerCase() === brutCat.toLowerCase()) || "Autre";
         return {
+          categorie: cat,
           designation: String((l && l.designation) || "").slice(0, 80),
           quantite: nombre(l && l.quantite) || 1,
           pu: nombre(l && l.pu),

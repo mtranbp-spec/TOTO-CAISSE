@@ -226,6 +226,9 @@ const TAUX_TGC = [0, 3, 6, 11, 22];
 function htDepuisTTC(ttc, taux) { return ttc / (1 + (taux || 0) / 100); }
 function tgcDepuisTTC(ttc, taux) { return ttc - htDepuisTTC(ttc, taux); }
 // Périodes glissantes proposées dans les statistiques.
+// Catégories comptables des achats. Elles servent au calcul du HT par poste,
+// ce que réclame la déclaration.
+const CATEGORIES_ACHAT = ["Boisson", "Matière première", "Emballage", "Entretien", "Matériel", "Service", "Autre"];
 const PERIODES = [
     { cle: "1j", label: "1J", jours: 1, pas: "heure", longLabel: "Dernières 24 heures", sousTitre: "Par heure" },
     { cle: "1s", label: "1S", jours: 7, pas: "jour", longLabel: "7 derniers jours", sousTitre: "Par jour" },
@@ -1252,77 +1255,66 @@ async function exporterAchatsExcel(achats, libelle, showToast) {
         showToast("⚠️ Export impossible : " + e.message);
         return;
     }
-    // Une seule feuille, présentée comme un journal d'achats : une ligne par
-    // facture, une colonne de base et une colonne de taxe pour chaque taux.
-    // C'est la forme attendue par un comptable et directement reportable dans
-    // une déclaration de TGC.
-    const lignes = achats
+    // Une seule feuille, une ligne par article. Ce grain permet à la fois le
+    // total par poste comptable et le total par taux, par simple tableau
+    // croisé — ce qu'une feuille par facture ne permettait pas.
+    const lignes = [];
+    achats
         .slice()
         .sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")))
-        .map((a) => {
-            const v = ventilationDe(a);
-            const parTaux = {};
-            TAUX_TGC.forEach((t) => { parTaux[t] = { ht: 0, tgc: 0 }; });
-            let aPreciser = { ht: 0, tgc: 0 };
-            v.forEach((l) => {
-                if (l.taux === null) {
-                    aPreciser.ht += l.ht;
-                    aPreciser.tgc += l.tgc;
-                    return;
-                }
-                if (!parTaux[l.taux])
-                    parTaux[l.taux] = { ht: 0, tgc: 0 };
-                parTaux[l.taux].ht += l.ht;
-                parTaux[l.taux].tgc += l.tgc;
+        .forEach((a) => {
+            const date = dateFr(a.dateKey ? a.dateKey + "T12:00:00" : a.createdAt);
+            const arts = Array.isArray(a.lignes) ? a.lignes : [];
+            if (arts.length) {
+                arts.forEach((l) => {
+                    lignes.push({
+                        "Date": date,
+                        "Fournisseur": a.fournisseur || "",
+                        "N° facture": a.numero || "",
+                        "Poste": l.categorie || "Autre",
+                        "Article": l.designation || "",
+                        "Quantité": Number(l.quantite) || 1,
+                        "PU": arrondi2(Number(l.pu) || 0),
+                        "HT": arrondi2(Number(l.ht) || 0),
+                        "Taux TGC": (Number(l.taux) || 0) / 100,
+                        "TGC": arrondi2(Number(l.tgc) || 0),
+                        "TTC": arrondi2(Number(l.ttc) || 0),
+                    });
+                });
+                return;
+            }
+            // Facture sans articles lus : on sort une ligne par taux pour ne
+            // rien perdre des montants, et le poste reste à renseigner.
+            ventilationDe(a).forEach((v) => {
+                lignes.push({
+                    "Date": date,
+                    "Fournisseur": a.fournisseur || "",
+                    "N° facture": a.numero || "",
+                    "Poste": "Non ventilé",
+                    "Article": "(détail non lu)",
+                    "Quantité": 1,
+                    "PU": arrondi2(v.ht + v.tgc),
+                    "HT": arrondi2(v.ht),
+                    "Taux TGC": v.taux === null ? "" : v.taux / 100,
+                    "TGC": arrondi2(v.tgc),
+                    "TTC": arrondi2(v.ht + v.tgc),
+                });
             });
-            const ligne = {
-                "Date": dateFr(a.dateKey ? a.dateKey + "T12:00:00" : a.createdAt),
-                "Fournisseur": a.fournisseur || "",
-                "N° facture": a.numero || "",
-                "Total HT": arrondi2(a.ht || 0),
-            };
-            TAUX_TGC.forEach((t) => {
-                ligne["Base " + t + " %"] = arrondi2(parTaux[t].ht);
-                if (t > 0)
-                    ligne["TGC " + t + " %"] = arrondi2(parTaux[t].tgc);
-            });
-            ligne["Base à préciser"] = arrondi2(aPreciser.ht);
-            ligne["TGC à préciser"] = arrondi2(aPreciser.tgc);
-            ligne["Total TGC"] = arrondi2(a.tgc || 0);
-            ligne["Total TTC"] = arrondi2(a.ttc || 0);
-            ligne["Note"] = a.note || "";
-            return ligne;
         });
-    // Ligne de totaux en bas : c'est elle qu'on reporte dans la déclaration.
     if (lignes.length) {
-        const total = { "Date": "", "Fournisseur": "TOTAL " + (libelle || ""), "N° facture": "", "Total HT": 0 };
-        TAUX_TGC.forEach((t) => {
-            total["Base " + t + " %"] = 0;
-            if (t > 0)
-                total["TGC " + t + " %"] = 0;
-        });
-        total["Base à préciser"] = 0;
-        total["TGC à préciser"] = 0;
-        total["Total TGC"] = 0;
-        total["Total TTC"] = 0;
-        total["Note"] = "";
+        const t = { "Date": "", "Fournisseur": "TOTAL " + (libelle || ""), "N° facture": "", "Poste": "", "Article": "", "Quantité": "", "PU": "", "HT": 0, "Taux TGC": "", "TGC": 0, "TTC": 0 };
         lignes.forEach((l) => {
-            Object.keys(total).forEach((k) => {
-                if (typeof l[k] === "number")
-                    total[k] = arrondi2((total[k] || 0) + l[k]);
-            });
+            t["HT"] = arrondi2(t["HT"] + (Number(l["HT"]) || 0));
+            t["TGC"] = arrondi2(t["TGC"] + (Number(l["TGC"]) || 0));
+            t["TTC"] = arrondi2(t["TTC"] + (Number(l["TTC"]) || 0));
         });
-        lignes.push(total);
+        lignes.push(t);
     }
     const classeur = XLSX.utils.book_new();
     const feuille = XLSX.utils.json_to_sheet(lignes.length ? lignes : [{ "Aucune facture": "" }]);
-    const largeurs = [11, 30, 14, 12];
-    TAUX_TGC.forEach((t) => { largeurs.push(11); if (t > 0) largeurs.push(11); });
-    largeurs.push(14, 14, 12, 12, 24);
-    feuille["!cols"] = largeurs.map((w) => ({ wch: w }));
-    // Fige l'en-tête : la feuille est large, on garde les titres sous les yeux.
-    feuille["!freeze"] = { xSplit: 3, ySplit: 1 };
-    XLSX.utils.book_append_sheet(classeur, feuille, "Journal des achats");
+    feuille["!cols"] = [11, 26, 14, 17, 34, 9, 10, 11, 9, 11, 11].map((w) => ({ wch: w }));
+    feuille["!freeze"] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(classeur, feuille, "Achats détaillés");
     const nom = "TOTO-achats-" + String(libelle || "export").replace(/[^\w-]+/g, "-").toLowerCase() + "-" + todayKey() + ".xlsx";
     try {
         XLSX.writeFile(classeur, nom);
@@ -3222,6 +3214,33 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
     const totaux = useMemo(() => visibles.reduce((t, a) => ({
         ht: t.ht + (a.ht || 0), tgc: t.tgc + (a.tgc || 0), ttc: t.ttc + (a.ttc || 0),
     }), { ht: 0, tgc: 0, ttc: 0 }), [visibles]);
+    // HT par catégorie comptable : c'est ce que réclame la déclaration. Une
+    // facture dont les articles n'ont pas été lus est rangée dans « Non
+    // ventilé » plutôt que d'être oubliée du calcul.
+    const parCategorie = useMemo(() => {
+        const m = new Map();
+        let nonVentile = 0;
+        visibles.forEach((a) => {
+            const l = Array.isArray(a.lignes) ? a.lignes : [];
+            if (!l.length) {
+                nonVentile += a.ht || 0;
+                return;
+            }
+            l.forEach((x) => {
+                const c = x.categorie || "Autre";
+                const e = m.get(c) || { ht: 0, tgc: 0, ttc: 0, nb: 0 };
+                e.ht += Number(x.ht) || 0;
+                e.tgc += Number(x.tgc) || 0;
+                e.ttc += Number(x.ttc) || 0;
+                e.nb++;
+                m.set(c, e);
+            });
+        });
+        const liste = Array.from(m.entries()).sort((x, y) => y[1].ht - x[1].ht);
+        if (nonVentile > 0)
+            liste.push(["Non ventilé", { ht: nonVentile, tgc: 0, ttc: 0, nb: 0 }]);
+        return liste;
+    }, [visibles]);
     // Ventilation par taux : c'est sous cette forme que la TGC déductible se
     // déclare. Les factures à taux mixte sont isolées, pas noyées dans un taux.
     const parTaux = useMemo(() => {
@@ -3372,6 +3391,13 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             return recalculer({ ...p, ventilation: v });
         });
     }
+    function majArticle(i, cle, valeur) {
+        setForm((p) => {
+            const l = (p.lignes || []).slice();
+            l[i] = { ...l[i], [cle]: valeur };
+            return { ...p, lignes: l };
+        });
+    }
     function ajouterLigneTaux() {
         setForm((p) => {
             const dejaLa = (p.ventilation || []).map((l) => Number(l.taux));
@@ -3414,7 +3440,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             numero: form.numero.trim(),
             ht: n(form.ht), tgc: n(form.tgc), ttc: n(form.ttc),
             ventilation: (form.ventilation || []).map((l) => ({ taux: Number(l.taux) || 0, ht: n(l.ht), tgc: n(l.tgc) })).filter((l) => l.ht !== 0 || l.tgc !== 0),
-            lignes: (form.lignes || []).map((l) => ({ designation: String(l.designation || ""), quantite: Number(l.quantite) || 1, pu: Number(l.pu) || 0, taux: Number(l.taux) || 0, ht: Number(l.ht) || 0, tgc: Number(l.tgc) || 0, ttc: Number(l.ttc) || 0 })).filter((l) => l.designation),
+            lignes: (form.lignes || []).map((l) => ({ categorie: String(l.categorie || "Autre"), designation: String(l.designation || ""), quantite: Number(l.quantite) || 1, pu: Number(l.pu) || 0, taux: Number(l.taux) || 0, ht: Number(l.ht) || 0, tgc: Number(l.tgc) || 0, ttc: Number(l.ttc) || 0 })).filter((l) => l.designation),
             note: form.note.trim(),
             photo: form.photo || "",
             createdAt: new Date().toISOString(),
@@ -3442,6 +3468,12 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
             React.createElement("button", { onClick: () => exporterAchatsExcel(visibles, (PERIODES.find((x) => x.cle === periode) || {}).longLabel, showToast), disabled: visibles.length === 0, style: { display: "flex", alignItems: "center", gap: 7, padding: "9px 15px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: visibles.length ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}` } },
                 React.createElement(Icon.Export, { size: 14, color: visibles.length ? ACCENT_GREEN : TEXT_MUTED }),
                 "Exporter vers Excel")),
+        parCategorie.length > 0 && React.createElement("div", { style: { borderRadius: 14, padding: 14, marginBottom: 12, background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { className: "font-display", style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 10 } }, "Achats HT par poste"),
+            parCategorie.map(([cat, e]) => React.createElement("div", { key: cat, style: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${LINE}` } },
+                React.createElement("span", { style: { flex: 1, fontSize: 13, color: cat === "Non ventilé" ? "#E8B44A" : TEXT } }, cat),
+                React.createElement("span", { style: { fontSize: 11, color: TEXT_MUTED, width: 64, textAlign: "right" } }, e.nb ? e.nb + " art." : "—"),
+                React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD, width: 96, textAlign: "right" } }, fmt(e.ht))))),
         parTaux.length > 0 && React.createElement("div", { style: { borderRadius: 14, padding: 14, marginBottom: 16, background: PANEL, border: `1px solid ${LINE}` } },
             React.createElement("div", { className: "font-display", style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 10 } }, "TGC déductible par taux"),
             parTaux.map(([taux, e]) => React.createElement("div", { key: String(taux), style: { display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: `1px solid ${LINE}` } },
@@ -3541,14 +3573,17 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                     React.createElement("label", { style: label }, "Articles lus sur la facture (" + form.lignes.length + ")"),
                     React.createElement("div", { style: { marginTop: 6, marginBottom: 12, borderRadius: 10, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } },
                         React.createElement("div", { style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 10, color: TEXT_MUTED, borderBottom: `1px solid ${LINE}` } },
-                            React.createElement("span", { style: { flex: 1 } }, "DÉSIGNATION"),
+                            React.createElement("span", { style: { flex: 1 } }, "DÉSIGNATION / CATÉGORIE"),
                             React.createElement("span", { style: { width: 26, textAlign: "right" } }, "QTÉ"),
                             React.createElement("span", { style: { width: 56, textAlign: "right" } }, "HT"),
                             React.createElement("span", { style: { width: 34, textAlign: "right" } }, "TGC"),
                             React.createElement("span", { style: { width: 48, textAlign: "right" } }, "MONT."),
                             React.createElement("span", { style: { width: 56, textAlign: "right" } }, "TTC")),
                         form.lignes.map((l, i) => React.createElement("div", { key: i, style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 11, borderBottom: i < form.lignes.length - 1 ? `1px solid ${LINE}` : "none" } },
-                            React.createElement("span", { style: { flex: 1, minWidth: 0, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, l.designation),
+                            React.createElement("span", { style: { flex: 1, minWidth: 0 } },
+                                React.createElement("span", { style: { display: "block", color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, l.designation),
+                                React.createElement("select", { value: l.categorie || "Autre", onChange: (e) => majArticle(i, "categorie", e.target.value), style: { marginTop: 3, padding: "2px 4px", borderRadius: 6, fontSize: 10, background: PANEL, color: TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                                    CATEGORIES_ACHAT.map((c) => React.createElement("option", { key: c, value: c }, c)))),
                             React.createElement("span", { className: "tabnum", style: { width: 26, textAlign: "right", color: TEXT_MUTED } }, l.quantite),
                             React.createElement("span", { className: "tabnum", style: { width: 56, textAlign: "right", color: TEXT_MUTED } }, fmt(l.ht || 0)),
                             React.createElement("span", { className: "tabnum", style: { width: 34, textAlign: "right", color: ACCENT_GREEN } }, (l.taux || 0) + " %"),

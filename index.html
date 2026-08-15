@@ -3619,6 +3619,46 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                     (form.ventilation || []).length === 0 && React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, padding: "12px 10px" } }, "Aucun taux renseigné."),
                     React.createElement("button", { onClick: ajouterLigneTaux, style: { width: "100%", padding: "9px 0", fontSize: 12, fontWeight: 600, background: "transparent", color: TEXT_MUTED, borderTop: `1px dashed ${LINE}` } }, "+ Ajouter un taux")),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: -4, marginBottom: 12 } }, "Une ligne par taux figurant sur la facture. Les totaux ci-dessus se recalculent."),
+                React.createElement("label", { style: label }, "Détail par catégorie"),
+                (() => {
+                    // Le récapitulatif se déduit des articles : il n'y a rien à
+                    // saisir ici, on corrige la catégorie sur la ligne d'article.
+                    const arts = form.lignes || [];
+                    if (!arts.length)
+                        return React.createElement("div", { style: { marginTop: 6, marginBottom: 12, padding: "12px 12px", borderRadius: 10, background: BG, border: `1px dashed ${LINE}`, fontSize: 11.5, color: TEXT_MUTED } },
+                            "Le détail des articles n'a pas été lu sur cette facture — aucune répartition par catégorie n'est possible. Les montants restent comptés dans le total.");
+                    const m = new Map();
+                    arts.forEach((l) => {
+                        const c = l.categorie || "Autre";
+                        const e = m.get(c) || { ht: 0, tgc: 0, ttc: 0, nb: 0 };
+                        e.ht += Number(l.ht) || 0;
+                        e.tgc += Number(l.tgc) || 0;
+                        e.ttc += Number(l.ttc) || 0;
+                        e.nb++;
+                        m.set(c, e);
+                    });
+                    const listeCat = Array.from(m.entries()).sort((x, y) => y[1].ht - x[1].ht);
+                    const tot = listeCat.reduce((t, [, e]) => ({ ht: t.ht + e.ht, tgc: t.tgc + e.tgc, ttc: t.ttc + e.ttc }), { ht: 0, tgc: 0, ttc: 0 });
+                    return React.createElement("div", { style: { marginTop: 6, marginBottom: 12, borderRadius: 10, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } },
+                        React.createElement("div", { style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 10, color: TEXT_MUTED, borderBottom: `1px solid ${LINE}` } },
+                            React.createElement("span", { style: { flex: 1 } }, "CATÉGORIE"),
+                            React.createElement("span", { style: { width: 30, textAlign: "right" } }, "ART."),
+                            React.createElement("span", { style: { width: 62, textAlign: "right" } }, "HT"),
+                            React.createElement("span", { style: { width: 54, textAlign: "right" } }, "TGC"),
+                            React.createElement("span", { style: { width: 62, textAlign: "right" } }, "TTC")),
+                        listeCat.map(([c, e]) => React.createElement("div", { key: c, style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 11.5, borderBottom: `1px solid ${LINE}` } },
+                            React.createElement("span", { style: { flex: 1, minWidth: 0, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c),
+                            React.createElement("span", { className: "tabnum", style: { width: 30, textAlign: "right", color: TEXT_MUTED } }, e.nb),
+                            React.createElement("span", { className: "tabnum", style: { width: 62, textAlign: "right", color: TEXT } }, fmt(e.ht)),
+                            React.createElement("span", { className: "tabnum", style: { width: 54, textAlign: "right", color: ACCENT_GREEN } }, fmt(e.tgc)),
+                            React.createElement("span", { className: "tabnum", style: { width: 62, textAlign: "right", color: GOLD, fontWeight: 600 } }, fmt(e.ttc)))),
+                        React.createElement("div", { style: { display: "flex", gap: 6, padding: "8px 10px", fontSize: 11.5, fontWeight: 600, background: PANEL } },
+                            React.createElement("span", { style: { flex: 1, color: TEXT_MUTED } }, "TOTAL"),
+                            React.createElement("span", { style: { width: 30 } }, ""),
+                            React.createElement("span", { className: "tabnum", style: { width: 62, textAlign: "right", color: TEXT } }, fmt(tot.ht)),
+                            React.createElement("span", { className: "tabnum", style: { width: 54, textAlign: "right", color: ACCENT_GREEN } }, fmt(tot.tgc)),
+                            React.createElement("span", { className: "tabnum", style: { width: 62, textAlign: "right", color: GOLD } }, fmt(tot.ttc))));
+                })(),
                 React.createElement("label", { style: label }, "Note"),
                 React.createElement("input", { value: form.note, onChange: (e) => setForm({ ...form, note: e.target.value }), style: champ, placeholder: "Facultatif" }),
                 React.createElement("button", { onClick: enregistrer, className: "font-display", style: { width: "100%", marginTop: 6, padding: "13px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, form.id ? "Enregistrer les corrections" : "Enregistrer l'achat")))));

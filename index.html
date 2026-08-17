@@ -2586,17 +2586,10 @@ function App() {
     return (React.createElement("div", { style: { background: BG, minHeight: "100vh" } },
         React.createElement(TirerPourRafraichir, null),
         React.createElement("div", { className: "toto-header", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
+            // Le vrai logo, celui de l'icône d'accueil. Il porte déjà « TOTO »
+            // et « Since 2004 » : le répéter à côté ferait doublon.
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-                React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 512 512", fill: "none" },
-                    React.createElement("circle", { cx: "256", cy: "256", r: "200", stroke: ACCENT, strokeWidth: "18" }),
-                    React.createElement("path", { d: "M170 210 C170 270 208 300 256 300 C304 300 342 270 342 210 Z", fill: ACCENT }),
-                    React.createElement("ellipse", { cx: "256", cy: "300", rx: "30", ry: "8", fill: ACCENT }),
-                    React.createElement("ellipse", { cx: "256", cy: "200", rx: "86", ry: "30", fill: TEXT }),
-                    React.createElement("line", { x1: "290", y1: "185", x2: "340", y2: "95", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" }),
-                    React.createElement("line", { x1: "305", y1: "192", x2: "360", y2: "105", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" })),
-                React.createElement("div", { style: { display: "flex", flexDirection: "column", lineHeight: 1 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 20, color: TEXT } }, "TOTO"),
-                    React.createElement("span", { style: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT } }, "Since 2004"))),
+                React.createElement("img", { src: "./icon.jpg", alt: "TOTO", width: 46, height: 46, style: { borderRadius: 11, display: "block" } })),
             React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
                 React.createElement("div", { title: syncStatus === "live" ? "Synchronisé" : syncStatus === "connecting" ? "Connexion..." : "Hors ligne", style: { width: 8, height: 8, borderRadius: 999, background: syncStatus === "live" ? ACCENT_GREEN : syncStatus === "connecting" ? GOLD : "#C2352A" } }),
                 React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: PANEL } },
@@ -4027,6 +4020,7 @@ function ClientsView({ clients, quotes, sales, carnet, saveClient, deleteClient,
 /* ---------- Fiche d'un client ---------- */
 function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, busy, onFermer, onEnregistrer, onSupprimer, onReglement, onRecap, onRelancer, majPaiementVente, supprimerReglement, showToast, modale }) {
     const [onglet, setOnglet] = useState("infos");
+    const [pieceOuverte, setPieceOuverte] = useState(null);
     const soldes = soldesClient(docs.ventes);
     const champ = { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 10, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
     const etiquette = { fontSize: 12, color: TEXT_MUTED };
@@ -4064,22 +4058,20 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
             fiche.id && React.createElement("button", { onClick: onSupprimer, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Supprimer la fiche")),
         onglet === "histo" && React.createElement("div", { style: { display: "grid", gap: 8 } },
             docs.devis.length + docs.ventes.length === 0 && React.createElement("div", { style: { padding: 24, textAlign: "center", fontSize: 13, color: TEXT_MUTED } }, "Aucun devis ni vente pour ce client."),
-            docs.devis.map((d) => React.createElement("div", { key: "d" + d.id, style: { borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
+            docs.devis.map((d) => React.createElement("button", { key: "d" + d.id, onClick: () => setPieceOuverte({ genre: "devis", doc: d }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8 } },
                     React.createElement("span", { style: { fontSize: 13, color: TEXT } }, "Devis " + (d.numero || "")),
                     React.createElement("span", { className: "tabnum", style: { fontSize: 13, color: TEXT } }, fmt(d.totalTTC || 0))),
-                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2 } }, [dateFr(d.createdAt), d.objet || null].filter(Boolean).join(" · ")),
-                React.createElement(BoutonsPiece, { onVoir: () => apercuDevis(d, showToast, "devis"), onEnvoyer: () => envoyerDevis(d, showToast, "devis") }))),
+                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2 } }, [dateFr(d.createdAt), (d.lignes || []).length + " lignes", d.objet || null].filter(Boolean).join(" · ")))),
             docs.ventes.map((v) => {
                 const st = statutReglement(v);
-                return React.createElement("div", { key: "v" + v.id, style: { borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
+                return React.createElement("button", { key: "v" + v.id, onClick: () => setPieceOuverte({ genre: "facture", doc: v }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
                     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8 } },
                         React.createElement("span", { style: { fontSize: 13, color: TEXT } }, "Facture " + (v.numero || "")),
                         React.createElement("span", { className: "tabnum", style: { fontSize: 13, color: TEXT } }, fmt(v.total || 0))),
                     React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2, display: "flex", gap: 6, alignItems: "center" } },
                         React.createElement("span", null, [dateFr(v.timestamp), heureFr(v.timestamp), (v.items || []).length + " articles"].filter(Boolean).join(" · ")),
-                        React.createElement("span", { style: { color: st.couleur, fontWeight: 600 } }, st.label)),
-                    React.createElement(BoutonsPiece, { onVoir: () => apercuDevis(factureDepuisVente(v), showToast, "facture"), onEnvoyer: () => envoyerDevis(factureDepuisVente(v), showToast, "facture") }));
+                        React.createElement("span", { style: { color: st.couleur, fontWeight: 600 } }, st.label)));
             })),
         onglet === "regl" && React.createElement("div", null,
             impayes.length === 0 && React.createElement("div", { style: { padding: 24, textAlign: "center", fontSize: 13, color: TEXT_MUTED } }, "Rien à encaisser : tout est réglé."),
@@ -4100,13 +4092,47 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
                             React.createElement("button", { onClick: () => supprimerReglement(v.id, i).then(() => showToast("Règlement retiré.")).catch((e) => showToast("⚠️ " + e.message)), title: "Retirer ce règlement", style: { display: "flex", padding: 2 } }, React.createElement(Icon.X, { size: 11, color: TEXT_MUTED }))))),
                     React.createElement("button", { onClick: () => onReglement(v), className: "font-display", style: { width: "100%", marginTop: 6, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer un règlement"));
             }))),
+        pieceOuverte && React.createElement(DetailPiece, { piece: pieceOuverte, onFermer: () => setPieceOuverte(null), showToast: showToast }),
         modale);
 }
-/* ---------- Deux boutons sous une pièce de l'historique ---------- */
-function BoutonsPiece({ onVoir, onEnvoyer }) {
-    return React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8 } },
-        React.createElement("button", { onClick: onVoir, style: { flex: 1, padding: "8px 0", borderRadius: 9, fontSize: 12, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
-        React.createElement("button", { onClick: onEnvoyer, style: { flex: 1, padding: "8px 0", borderRadius: 9, fontSize: 12, fontWeight: 600, background: "transparent", color: ACCENT_GREEN, border: `1px solid ${ACCENT_GREEN}` } }, "Envoyer"));
+/* ---------- Détail d'une pièce de l'historique client ----------
+   Même principe que le détail d'un ticket dans Stats : la liste reste sobre,
+   et le détail complet n'apparaît qu'au clic. */
+function DetailPiece({ piece, onFermer, showToast }) {
+    const estDevis = piece.genre === "devis";
+    const doc = piece.doc;
+    const lignes = estDevis ? (doc.lignes || []) : (doc.items || []);
+    const total = estDevis ? (doc.totalTTC || 0) : (doc.total || 0);
+    const pdf = estDevis ? doc : factureDepuisVente(doc);
+    const typePdf = estDevis ? "devis" : "facture";
+    const quand = estDevis ? doc.createdAt : doc.timestamp;
+    const st = estDevis ? null : statutReglement(doc);
+    return React.createElement("div", { onClick: onFermer, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16, background: "rgba(0,0,0,0.6)" } },
+        React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 400, maxHeight: "84vh", overflowY: "auto", borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 } },
+                React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, (estDevis ? "Devis " : "Facture ") + (doc.numero || "")),
+                React.createElement("button", { onClick: onFermer, style: { background: "transparent" } }, React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
+            React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } },
+                [quand ? new Date(quand).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: estDevis ? undefined : "short" }) : "",
+                    doc.objet || null, doc.vendeur ? "Vendu par " + doc.vendeur : null].filter(Boolean).join(" · ")),
+            lignes.length === 0 && React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 10 } }, "Aucune ligne enregistrée sur cette pièce."),
+            lignes.map((l, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${LINE}` } },
+                React.createElement("span", { style: { flex: 1, fontSize: 13, color: TEXT } }, l.name),
+                React.createElement("span", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, width: 62, textAlign: "right" } }, fmt(l.price) + " × " + l.qty),
+                React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD, width: 74, textAlign: "right" } }, fmt(l.price * l.qty)))),
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 } },
+                React.createElement("span", { className: "font-display", style: { fontSize: 13, color: TEXT_MUTED } }, "TOTAL TTC"),
+                React.createElement("span", { className: "tabnum font-display", style: { fontSize: 20, color: GOLD } }, fmt(total))),
+            // L'état du règlement n'a de sens que sur une facture portée au compte.
+            st && estSurCompte(doc) && React.createElement("div", { style: { marginTop: 10, padding: "9px 11px", borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED } },
+                    React.createElement("span", null, "Déjà réglé"),
+                    React.createElement("span", { className: "tabnum" }, fmt(totalRegle(doc)))),
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, marginTop: 4, color: st.couleur } },
+                    React.createElement("span", null, st.label),
+                    React.createElement("span", { className: "tabnum" }, fmt(resteDu(doc))))),
+            React.createElement("button", { onClick: () => apercuDevis(pdf, showToast, typePdf), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
+            React.createElement("button", { onClick: () => envoyerDevis(pdf, showToast, typePdf), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client")));
 }
 /* ---------- Saisie d'un règlement ---------- */
 function ModaleReglement({ vente, onFermer, onValider }) {
@@ -4690,15 +4716,7 @@ function LoginView() {
     }
     return (React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: BG } },
         React.createElement("div", { style: { width: "100%", maxWidth: 320, display: "flex", flexDirection: "column", alignItems: "center" } },
-            React.createElement("svg", { width: "64", height: "64", viewBox: "0 0 512 512", fill: "none" },
-                React.createElement("circle", { cx: "256", cy: "256", r: "200", stroke: ACCENT, strokeWidth: "18" }),
-                React.createElement("path", { d: "M170 210 C170 270 208 300 256 300 C304 300 342 270 342 210 Z", fill: ACCENT }),
-                React.createElement("ellipse", { cx: "256", cy: "300", rx: "30", ry: "8", fill: ACCENT }),
-                React.createElement("ellipse", { cx: "256", cy: "200", rx: "86", ry: "30", fill: TEXT }),
-                React.createElement("line", { x1: "290", y1: "185", x2: "340", y2: "95", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" }),
-                React.createElement("line", { x1: "305", y1: "192", x2: "360", y2: "105", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" })),
-            React.createElement("div", { className: "font-display", style: { fontSize: 26, marginTop: 12, color: TEXT } }, "TOTO"),
-            React.createElement("div", { style: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT, marginBottom: 28 } }, "Since 2004"),
+            React.createElement("img", { src: "./icon.jpg", alt: "TOTO", width: 132, height: 132, style: { borderRadius: 24, display: "block", marginBottom: 28 } }),
             React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, alignSelf: "flex-start" } }, "Code d'accès"),
             React.createElement("div", { style: { width: "100%", marginTop: 6 } },
                 React.createElement(ChampMotDePasse, { value: pin, inputMode: "numeric", autoFocus: true, disabled: busy, onChange: (e) => setPin(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") submit(); }, style: { padding: "14px 16px", borderRadius: 12, fontSize: 20, letterSpacing: 6, textAlign: "center", background: PANEL, color: TEXT, border: `1px solid ${error ? ACCENT : LINE}` }, placeholder: "••••" })),

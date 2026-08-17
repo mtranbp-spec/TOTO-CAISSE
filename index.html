@@ -228,16 +228,8 @@ function tgcDepuisTTC(ttc, taux) { return ttc - htDepuisTTC(ttc, taux); }
 // Périodes glissantes proposées dans les statistiques.
 // Catégories comptables des achats. Elles servent au calcul du HT par poste,
 // ce que réclame la déclaration.
+const MOIS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 const CATEGORIES_ACHAT = ["Boisson", "Matière première", "Emballage", "Entretien", "Matériel", "Service", "Autre"];
-const PERIODES = [
-    { cle: "1j", label: "1J", jours: 1, pas: "heure", longLabel: "Dernières 24 heures", sousTitre: "Par heure" },
-    { cle: "1s", label: "1S", jours: 7, pas: "jour", longLabel: "7 derniers jours", sousTitre: "Par jour" },
-    { cle: "1m", label: "1M", jours: 30, pas: "jour", longLabel: "30 derniers jours", sousTitre: "Par jour" },
-    { cle: "6m", label: "6M", jours: 182, pas: "mois", longLabel: "6 derniers mois", sousTitre: "Par mois" },
-    { cle: "1a", label: "1A", jours: 365, pas: "mois", longLabel: "12 derniers mois", sousTitre: "Par mois" },
-    { cle: "5a", label: "5A", jours: 1826, pas: "annee", longLabel: "5 dernières années", sousTitre: "Par année" },
-    { cle: "max", label: "Tout", jours: null, pas: "annee", longLabel: "Depuis le début", sousTitre: "Par année" },
-];
 const PALETTE = [ACCENT, ACCENT_GREEN, GOLD, "#4B7BE1", "#B85AE1", "#E8763A", "#3AA8E8", "#8AC926"];
 function catColor(cat, cats) {
     if (CATEGORY_COLORS[cat])
@@ -1640,7 +1632,8 @@ function App() {
     const [cart, setCart] = useState([]);
     const [activeCategory, setActiveCategory] = useState("Toutes");
     const [view, setView] = useState("pos");
-    const [statsPeriod, setStatsPeriod] = useState("1j");
+    const [statsAnnee, setStatsAnnee] = useState(String(new Date().getFullYear()));
+    const [statsMois, setStatsMois] = useState("");
     const [jourChoisi, setJourChoisi] = useState("");
     const [toast, setToast] = useState(null);
     const [editing, setEditing] = useState(null);
@@ -1964,12 +1957,15 @@ function App() {
         // hors-taxe = TTC et leurs chiffres restent inchangés.
         return sale.items.reduce((sum, it) => sum + (htDepuisTTC(it.price, it.tgc) - (costLookup[it.id] || 0)) * it.qty, 0);
     }
-    // Fenêtres glissantes, comme sur une appli bancaire. La granularité du
-    // graphique suit la durée : par heure sur une journée, par mois sur un an.
+    // Statistiques par exercice et par mois, comme les achats : c'est la maille
+    // sur laquelle on compare une activité d'une année sur l'autre.
+    const anneesVentes = useMemo(() => {
+        const set = new Set(sales.map((s) => yearKeyOf(s.dateKey)).filter((x) => /^\d{4}$/.test(x)));
+        set.add(String(new Date().getFullYear()));
+        return Array.from(set).sort().reverse();
+    }, [sales]);
     const statsData = useMemo(() => {
-        const maintenant = new Date();
-        const def = PERIODES.find((x) => x.cle === statsPeriod) || PERIODES[0];
-        // Un jour choisi au calendrier prend le pas sur la période.
+        // Un jour choisi au calendrier prend le pas sur tout le reste.
         if (jourChoisi) {
             const currentSales = sales.filter((s) => s.dateKey === jourChoisi);
             const [an, mo, jo] = jourChoisi.split("-").map(Number);
@@ -1978,59 +1974,42 @@ function App() {
                 const ca = currentSales
                     .filter((s) => s.timestamp && new Date(s.timestamp).getHours() === h)
                     .reduce((sum, s) => sum + s.total, 0);
-                trend.push({ key: "h" + h, label: (h % 3 === 0 ? h + "h" : ""), ca: ca });
+                trend.push({ key: "h" + h, label: (h % 3 === 0 ? h + "h" : ""), ca });
             }
             return { currentSales, trend, currentLabel: new Date(an, mo - 1, jo).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), sousTitre: "Par heure" };
         }
-        const depuis = def.jours === null ? null : new Date(maintenant.getTime() - def.jours * 86400000);
-        const currentSales = sales.filter((s) => {
-            if (!depuis)
-                return true;
-            const d = s.timestamp ? new Date(s.timestamp) : (s.dateKey ? new Date(s.dateKey + "T12:00:00") : null);
-            return d && d >= depuis;
-        });
-        const trend = [];
-        if (def.pas === "heure") {
-            for (let i = 23; i >= 0; i--) {
-                const borne = new Date(maintenant.getTime() - i * 3600000);
-                const ca = currentSales.filter((s) => {
-                    const d = s.timestamp ? new Date(s.timestamp) : null;
-                    return d && d.getFullYear() === borne.getFullYear() && d.getMonth() === borne.getMonth() && d.getDate() === borne.getDate() && d.getHours() === borne.getHours();
-                }).reduce((sum, s) => sum + s.total, 0);
-                trend.push({ key: "h" + i, label: (i % 4 === 0 ? borne.getHours() + "h" : ""), ca });
-            }
-        }
-        else if (def.pas === "jour") {
-            const n = def.jours;
-            const tk = todayKey();
-            for (let i = n - 1; i >= 0; i--) {
-                const k = addDaysKey(tk, -i);
-                const ca = currentSales.filter((s) => s.dateKey === k).reduce((sum, s) => sum + s.total, 0);
-                trend.push({ key: k, label: (n <= 7 || i % Math.ceil(n / 8) === 0) ? shortDayLabel(k) : "", ca });
-            }
-        }
-        else if (def.pas === "mois") {
-            const n = Math.max(1, Math.round(def.jours / 30.4));
-            for (let i = n - 1; i >= 0; i--) {
-                const dt = new Date(maintenant.getFullYear(), maintenant.getMonth() - i, 1);
-                const k = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0");
-                const ca = currentSales.filter((s) => monthKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0);
-                trend.push({ key: k, label: (n <= 12 || i % 2 === 0) ? monthLabel(k) : "", ca });
-            }
-        }
-        else {
-            const annees = Array.from(new Set(currentSales.map((s) => yearKeyOf(s.dateKey))));
-            const courante = String(maintenant.getFullYear());
+        // Tout l'historique : une barre par année.
+        if (statsAnnee === "tout") {
+            const currentSales = sales;
+            const annees = Array.from(new Set(currentSales.map((s) => yearKeyOf(s.dateKey)))).filter(Boolean);
+            const courante = String(new Date().getFullYear());
             if (!annees.includes(courante))
                 annees.push(courante);
             annees.sort();
-            annees.forEach((k) => {
-                const ca = currentSales.filter((s) => yearKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0);
-                trend.push({ key: k, label: k, ca });
-            });
+            const trend = annees.map((k) => ({ key: k, label: k, ca: currentSales.filter((s) => yearKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0) }));
+            return { currentSales, trend, currentLabel: "Tout l'historique", sousTitre: "Par année" };
         }
-        return { currentSales, trend, currentLabel: def.longLabel, sousTitre: def.sousTitre };
-    }, [sales, statsPeriod, jourChoisi]);
+        // Une année entière : une barre par mois.
+        if (!statsMois) {
+            const currentSales = sales.filter((s) => yearKeyOf(s.dateKey) === statsAnnee);
+            const trend = [];
+            for (let m = 1; m <= 12; m++) {
+                const k = statsAnnee + "-" + String(m).padStart(2, "0");
+                trend.push({ key: k, label: monthLabel(k), ca: currentSales.filter((s) => monthKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0) });
+            }
+            return { currentSales, trend, currentLabel: "Année " + statsAnnee, sousTitre: "Par mois" };
+        }
+        // Un mois : une barre par jour, sur le nombre exact de jours du mois.
+        const cle = statsAnnee + "-" + statsMois;
+        const currentSales = sales.filter((s) => monthKeyOf(s.dateKey) === cle);
+        const nbJours = new Date(Number(statsAnnee), Number(statsMois), 0).getDate();
+        const trend = [];
+        for (let j = 1; j <= nbJours; j++) {
+            const k = cle + "-" + String(j).padStart(2, "0");
+            trend.push({ key: k, label: (j === 1 || j % 5 === 0) ? String(j) : "", ca: currentSales.filter((s) => s.dateKey === k).reduce((sum, s) => sum + s.total, 0) });
+        }
+        return { currentSales, trend, currentLabel: MOIS_LONG[Number(statsMois) - 1] + " " + statsAnnee, sousTitre: "Par jour" };
+    }, [sales, statsAnnee, statsMois, jourChoisi]);
     const periodStats = useMemo(() => {
         const { currentSales } = statsData;
         const ca = currentSales.reduce((sum, s) => sum + s.total, 0);
@@ -2270,7 +2249,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "achats", onClick: () => setView("achats"), icon: React.createElement(Icon.Panier, { size: 13 }) }, "Achats")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { annee: statsAnnee, setAnnee: setStatsAnnee, mois: statsMois, setMois: setStatsMois, anneesVentes: anneesVentes, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement(BarreDefilante, { actif: !reorderPos, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -2421,21 +2400,30 @@ function KpiCard({ label, value, color }) {
         React.createElement("div", { style: { fontSize: 11, marginBottom: 4, color: TEXT_MUTED } }, label),
         React.createElement("div", { className: "tabnum font-display", style: { fontSize: 18, color } }, value)));
 }
-function StatsView({ period, setPeriod, currentLabel, sousTitre, jourChoisi, setJourChoisi, trend, stats, ventes, showToast, factureDepuisVente, produits }) {
+function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel, sousTitre, jourChoisi, setJourChoisi, trend, stats, ventes, showToast, factureDepuisVente, produits }) {
     const [exportEnCours, setExportEnCours] = useState(false);
     const [detail, setDetail] = useState(null);
     const ventesTriees = useMemo(() => (ventes || []).slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))), [ventes]);
     const maxCa = Math.max(1, ...trend.map((t) => t.ca));
     const bestProduit = stats.topProduits[0];
     return (React.createElement("div", { style: { padding: 20 } },
-        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 4 } }, PERIODES.map((opt) => {
-            const actif = !jourChoisi && period === opt.cle;
-            return React.createElement("button", { key: opt.cle, onClick: () => { setJourChoisi(""); setPeriod(opt.cle); }, style: { flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: actif ? ACCENT : PANEL, color: actif ? "#fff" : TEXT_MUTED, border: `1px solid ${actif ? ACCENT : LINE}` } }, opt.label);
-        })),
+        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
+            (anneesVentes || []).map((an) => {
+                const actif = !jourChoisi && annee === an;
+                return React.createElement("button", { key: an, onClick: () => { setJourChoisi(""); setAnnee(an); }, style: { flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: actif ? ACCENT : PANEL, color: actif ? "#fff" : TEXT_MUTED, border: `1px solid ${actif ? ACCENT : LINE}` } }, an);
+            }),
+            React.createElement("button", { onClick: () => { setJourChoisi(""); setAnnee("tout"); setMois(""); }, style: { flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: !jourChoisi && annee === "tout" ? ACCENT : "transparent", color: !jourChoisi && annee === "tout" ? "#fff" : TEXT_MUTED, border: `1px ${!jourChoisi && annee === "tout" ? "solid" : "dashed"} ${!jourChoisi && annee === "tout" ? ACCENT : LINE}` } }, "Tout")),
+        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
+            React.createElement("button", { onClick: () => { setJourChoisi(""); setMois(""); }, disabled: annee === "tout", style: { flexShrink: 0, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: !mois && !jourChoisi ? PANEL : "transparent", color: annee === "tout" ? LINE : (!mois && !jourChoisi ? TEXT : TEXT_MUTED), border: `1px solid ${!mois && !jourChoisi && annee !== "tout" ? TEXT_MUTED : LINE}` } }, "Toute l'année"),
+            MOIS_LONG.map((nom, i) => {
+                const cle = String(i + 1).padStart(2, "0");
+                const actif = !jourChoisi && mois === cle && annee !== "tout";
+                return React.createElement("button", { key: cle, onClick: () => { setJourChoisi(""); setMois(cle); }, disabled: annee === "tout", title: nom + " " + annee, style: { flexShrink: 0, padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: actif ? ACCENT_GREEN : "transparent", color: annee === "tout" ? LINE : (actif ? "#fff" : TEXT_MUTED), border: `1px solid ${actif ? ACCENT_GREEN : LINE}` } }, nom.slice(0, 3));
+            })),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" } },
             React.createElement("span", { style: { fontSize: 12, color: TEXT_MUTED } }, "ou un jour précis :"),
             React.createElement("input", { type: "date", value: jourChoisi, max: todayKey(), onChange: (e) => setJourChoisi(e.target.value), style: { padding: "7px 10px", borderRadius: 8, fontSize: 13, background: BG, color: jourChoisi ? TEXT : TEXT_MUTED, border: `1px solid ${jourChoisi ? ACCENT : LINE}`, colorScheme: "dark" } }),
-            jourChoisi && React.createElement("button", { onClick: () => setJourChoisi(""), style: { padding: "7px 12px", borderRadius: 999, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px solid ${LINE}` } }, "Revenir aux périodes")),
+            jourChoisi && React.createElement("button", { onClick: () => setJourChoisi(""), style: { padding: "7px 12px", borderRadius: 999, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px solid ${LINE}` } }, "Revenir au mois")),
         React.createElement("button", { onClick: () => { setExportEnCours(true); exporterExcel(ventes || [], produits || [], currentLabel, showToast).then(() => setExportEnCours(false)); }, disabled: exportEnCours, style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", marginBottom: 16, borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: exportEnCours ? TEXT_MUTED : TEXT, border: `1px solid ${LINE}` } },
             React.createElement(Icon.Export, { size: 14, color: exportEnCours ? TEXT_MUTED : ACCENT_GREEN }),
             exportEnCours ? "Génération…" : "Exporter vers Excel"),

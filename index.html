@@ -4170,18 +4170,32 @@ function ChampsClient({ valeur, setValeur, carnet, compact }) {
     const style = compact
         ? { width: "100%", marginTop: 3, padding: "8px 10px", borderRadius: 8, fontSize: 13, background: PANEL, color: TEXT, border: `1px solid ${LINE}` }
         : { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
+    // Échap referme la liste sans toucher à ce qui est déjà saisi.
+    useEffect(() => {
+        function onKey(e) {
+            if (e.key === "Escape" && ouvert)
+                setOuvert("");
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [ouvert]);
     return React.createElement("div", null, champs.map((ch) => {
         const liste = ch.suggere && ouvert === ch.cle ? propositions(ch.cle) : [];
         return React.createElement("div", { key: ch.cle, style: { marginBottom: liste.length ? 4 : 10 } },
             React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, ch.label),
-            React.createElement("input", {
-                value: valeur[ch.cle] || "",
-                onFocus: () => setOuvert(ch.suggere ? ch.cle : ""),
-                onChange: (e) => { setValeur({ ...valeur, [ch.cle]: e.target.value }); setOuvert(ch.suggere ? ch.cle : ""); },
-                inputMode: ch.mode || "text",
-                placeholder: ch.label,
-                style: style,
-            }),
+            React.createElement("div", { style: { position: "relative" } },
+                React.createElement("input", {
+                    value: valeur[ch.cle] || "",
+                    onFocus: () => setOuvert(ch.suggere ? ch.cle : ""),
+                    onChange: (e) => { setValeur({ ...valeur, [ch.cle]: e.target.value }); setOuvert(ch.suggere ? ch.cle : ""); },
+                    inputMode: ch.mode || "text",
+                    placeholder: ch.label,
+                    style: { ...style, paddingRight: liste.length ? 36 : (style.paddingRight || undefined) },
+                }),
+                // La croix ne vide pas le champ : elle referme seulement la
+                // liste, qui masquait les champs suivants.
+                liste.length > 0 && React.createElement("button", { onClick: () => setOuvert(""), title: "Fermer les propositions (Échap)", style: { position: "absolute", right: compact ? 5 : 6, top: compact ? 6 : 8, width: 24, height: 24, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
+                    React.createElement(Icon.X, { size: 12, color: TEXT_MUTED }))),
             // Choisir une proposition remplit les quatre champs d'un coup :
             // c'est tout l'intérêt, ne pas ressaisir téléphone et e-mail.
             liste.length > 0 && React.createElement("div", { style: { marginTop: 4, marginBottom: 10, borderRadius: 8, background: compact ? BG : PANEL, border: `1px solid ${LINE}`, overflow: "hidden" } }, liste.map((c, i) => React.createElement("button", {

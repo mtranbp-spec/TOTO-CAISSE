@@ -446,9 +446,34 @@ const BANQUE = [
     "RIB : 17499 00012 17103202012 66",
 ];
 async function genererPdfDevis(devis, type) {
-    const estFacture = type === "facture";
+    return genererPdfDossier([{ devis: devis, type: type }]);
+}
+// Un seul moteur pour une pièce isolée comme pour un dossier complet : le
+// relevé de fin de mois suivi des factures qu'il regroupe. Sans ça il aurait
+// fallu fusionner des PDF, ce que jsPDF ne sait pas faire.
+async function genererPdfDossier(pieces) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "a4" });
+    for (let i = 0; i < pieces.length; i++) {
+        if (i > 0)
+            doc.addPage();
+        await dessinerPiece(doc, pieces[i].devis, pieces[i].type, i === 0);
+    }
+    const reference = (pieces[0] && pieces[0].devis.numero) || "";
+    const total = doc.getNumberOfPages();
+    for (let i = 1; i <= total; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7.5);
+        doc.setTextColor(150, 150, 150);
+        doc.text(SOCIETE.nom + " — " + SOCIETE.adresse + " — " + SOCIETE.tel, 105, 288, { align: "center" });
+        if (total > 1)
+            doc.text(reference + " — page " + i + "/" + total, 198, 288, { align: "right" });
+    }
+    return doc.output("blob");
+}
+async function dessinerPiece(doc, devis, type, avecBanque) {
+    const estFacture = type === "facture";
+    const estReleve = !!devis.recap;
     const M = 12, DROITE = 210 - M, L = 210 - M * 2;
     let y = M + 4;
     // --- En-tête : bandeau à gauche, identité de l'entreprise à droite ---
@@ -462,7 +487,7 @@ async function genererPdfDevis(devis, type) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(24);
     doc.setTextColor(214, 31, 26);
-    doc.text(estFacture ? "FACTURE" : "DEVIS", DROITE, yd, { align: "right" });
+    doc.text(estReleve ? "RELEVÉ" : (estFacture ? "FACTURE" : "DEVIS"), DROITE, yd, { align: "right" });
     yd += 8;
     doc.setTextColor(20, 20, 20);
     doc.setFontSize(12);
@@ -512,7 +537,7 @@ async function genererPdfDevis(devis, type) {
     let yr = y + 6;
     doc.setFontSize(9);
     doc.setFont("helvetica", "bold");
-    doc.text((estFacture ? "Facture n° : " : "Devis n° : "), milieu + 4, yr);
+    doc.text(estReleve ? "Relevé n° : " : (estFacture ? "Facture n° : " : "Devis n° : "), milieu + 4, yr);
     doc.setFont("helvetica", "normal");
     doc.text(String(devis.numero), milieu + (estFacture ? 27 : 22), yr);
     yr += 5;
@@ -532,7 +557,7 @@ async function genererPdfDevis(devis, type) {
         }
         doc.setFont("helvetica", "italic");
         doc.setFontSize(8.5);
-        doc.text("Facture acquittée. Merci de votre visite.", milieu + 4, yr);
+        doc.text(estReleve ? "Relevé des factures restant à régler." : "Facture acquittée. Merci de votre visite.", milieu + 4, yr);
     }
     else {
         doc.setFont("helvetica", "italic");
@@ -553,6 +578,82 @@ async function genererPdfDevis(devis, type) {
         doc.text(String(devis.objet), M + 14, y);
         doc.setFont("helvetica", "normal");
         y += 8;
+    }
+    // --- Relevé : une ligne par facture au lieu d'une ligne par article ---
+    if (estReleve) {
+        const cols = [M + 2, 62, 96, 130, 160, DROITE - 2];
+        const entetes = ["FACTURE", "DATE", "ÉCHÉANCE", "TOTAL", "RÉGLÉ", "RESTE DÛ"];
+        function enTeteReleve() {
+            doc.setFillColor(34, 29, 26);
+            doc.rect(M, y - 5, L, 8, "F");
+            doc.setTextColor(243, 234, 217);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7.5);
+            entetes.forEach((t, i) => doc.text(t, cols[i], y, i > 0 ? { align: "right" } : undefined));
+            doc.setTextColor(20, 20, 20);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9);
+            y += 8;
+        }
+        enTeteReleve();
+        let totalDu = 0;
+        (devis.recap || []).forEach((r) => {
+            if (y > 250) {
+                doc.addPage();
+                y = M + 12;
+                enTeteReleve();
+            }
+            totalDu += Number(r.reste || 0);
+            // Une facture échue est signalée en rouge : c'est la seule
+            // information que l'on veut voir au premier coup d'œil.
+            if (r.enRetard)
+                doc.setTextColor(214, 31, 26);
+            doc.text(String(r.numero || ""), cols[0], y);
+            doc.text(String(r.date || ""), cols[1], y, { align: "right" });
+            doc.text(String(r.echeance || ""), cols[2], y, { align: "right" });
+            doc.text(fmtPdf(r.total || 0), cols[3], y, { align: "right" });
+            doc.text(fmtPdf(r.regle || 0), cols[4], y, { align: "right" });
+            doc.setFont("helvetica", "bold");
+            doc.text(fmtPdf(r.reste || 0), cols[5], y, { align: "right" });
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(20, 20, 20);
+            y += 6;
+            doc.setDrawColor(228, 226, 222);
+            doc.setLineWidth(0.2);
+            doc.line(M, y - 4, DROITE, y - 4);
+        });
+        y += 6;
+        if (y > 230) {
+            doc.addPage();
+            y = M + 12;
+        }
+        doc.setFillColor(214, 31, 26);
+        doc.rect(124, y - 4, DROITE - 124, 9, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11.5);
+        doc.text("TOTAL À RÉGLER", 128, y + 2);
+        doc.text(fmtPdf(totalDu), DROITE - 2, y + 2, { align: "right" });
+        doc.setTextColor(20, 20, 20);
+        doc.setFont("helvetica", "normal");
+        y += 16;
+        doc.setFontSize(9);
+        if (devis.note) {
+            doc.splitTextToSize(String(devis.note), L).forEach((t) => {
+                doc.text(t, M, y);
+                y += 4.5;
+            });
+        }
+        if (avecBanque) {
+            doc.setFontSize(8);
+            doc.setTextColor(140, 140, 140);
+            let yb = 272;
+            BANQUE.forEach((t) => {
+                doc.text(t, M, yb);
+                yb += 4;
+            });
+        }
+        return;
     }
     // --- Tableau des lignes ---
     const xQte = 103, xPuHt = 128, xTgc = 146, xPuTtc = 172, xTot = DROITE - 2;
@@ -641,25 +742,16 @@ async function genererPdfDevis(devis, type) {
         doc.setLineWidth(0.3);
         doc.rect(120, y + 3, 78, 22);
     }
-    // --- Coordonnées bancaires et pied de page, sur la dernière page ---
-    const total = doc.getNumberOfPages();
-    doc.setPage(total);
-    doc.setFontSize(8);
-    doc.setTextColor(140, 140, 140);
-    let yb = 272;
-    BANQUE.forEach((t) => {
-        doc.text(t, M, yb);
-        yb += 4;
-    });
-    for (let i = 1; i <= total; i++) {
-        doc.setPage(i);
-        doc.setFontSize(7.5);
-        doc.setTextColor(150, 150, 150);
-        doc.text(SOCIETE.nom + " — " + SOCIETE.adresse + " — " + SOCIETE.tel, 105, 288, { align: "center" });
-        if (total > 1)
-            doc.text(devis.numero + " — page " + i + "/" + total, DROITE, 288, { align: "right" });
+    // --- Coordonnées bancaires : sur la pièce principale seulement ---
+    if (avecBanque) {
+        doc.setFontSize(8);
+        doc.setTextColor(140, 140, 140);
+        let yb = 272;
+        BANQUE.forEach((t) => {
+            doc.text(t, M, yb);
+            yb += 4;
+        });
     }
-    return doc.output("blob");
 }
 async function apercuDevis(devis, showToast, type) {
     let blob;
@@ -723,6 +815,61 @@ async function envoyerDevis(devis, showToast, type) {
     showToast("PDF téléchargé — joins-le au message");
     const dest = (devis.client && devis.client.email) ? encodeURIComponent(devis.client.email) : "";
     window.location.href = "mailto:" + dest + "?subject=" + encodeURIComponent(sujet) + "&body=" + encodeURIComponent(corps);
+}
+// Relevé + factures dans un seul fichier : le client reçoit une pièce jointe
+// unique, ce qui évite les envois multiples et les oublis.
+async function apercuDossier(pieces, nomFichier, showToast) {
+    let blob;
+    try {
+        blob = await genererPdfDossier(pieces);
+    }
+    catch (e) {
+        showToast("⚠️ Aperçu impossible : " + (e.message || "erreur"));
+        return;
+    }
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    if (!w) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = nomFichier + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showToast("Aperçu téléchargé");
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+async function envoyerDossier(pieces, nomFichier, sujet, corps, email, showToast) {
+    let blob;
+    try {
+        blob = await genererPdfDossier(pieces);
+    }
+    catch (e) {
+        showToast("⚠️ PDF impossible : " + (e.message || "erreur"));
+        return;
+    }
+    const fichier = new File([blob], nomFichier + ".pdf", { type: "application/pdf" });
+    if (navigator.canShare && navigator.canShare({ files: [fichier] })) {
+        try {
+            await navigator.share({ files: [fichier], title: sujet, text: corps });
+            return;
+        }
+        catch (e) {
+            if (e && e.name === "AbortError")
+                return;
+        }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nomFichier + ".pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 8000);
+    showToast("PDF téléchargé — joins-le au message");
+    window.location.href = "mailto:" + (email ? encodeURIComponent(email) : "") + "?subject=" + encodeURIComponent(sujet) + "&body=" + encodeURIComponent(corps);
 }
 /* ---------- Grille réorganisable (glisser-déposer doigt + souris) ----------
    Le drag HTML5 natif ne fonctionne pas au toucher : on passe donc par les
@@ -2301,16 +2448,49 @@ function App() {
         const cle = cleClient(c);
         return cle ? clients.find((f) => cleClient(f) === cle) || null : null;
     }
+    // Renommer une fiche ne réécrit JAMAIS les devis et factures déjà émis :
+    // un document comptable doit rester tel qu'il a été envoyé au client. Le
+    // lien est maintenu autrement — par l'identifiant, inscrit sur chaque pièce,
+    // et par la mémoire des anciens noms dans « alias ».
     function saveClient(fiche, id) {
         const db = getDb();
         if (!db)
             return Promise.reject(new Error("Pas de connexion."));
-        const donnees = { ...fiche, updatedAt: new Date().toISOString() };
-        if (id)
-            return db.collection("clients").doc(id).set(donnees).then(() => id);
-        const nouvelId = "c" + Date.now() + Math.random().toString(36).slice(2, 5);
-        donnees.createdAt = new Date().toISOString();
-        return db.collection("clients").doc(nouvelId).set(donnees).then(() => nouvelId);
+        const ancien = id ? clients.find((c) => c.id === id) : null;
+        const cleNouvelle = cleClient(fiche);
+        const cleAncienne = ancien ? cleClient(ancien) : "";
+        const alias = Array.from(new Set(((ancien && ancien.alias) || [])
+            .concat(cleAncienne && cleAncienne !== cleNouvelle ? [cleAncienne] : [])
+            .filter((a) => a && a !== cleNouvelle)));
+        const donnees = { ...fiche, alias: alias, updatedAt: new Date().toISOString() };
+        const idFinal = id || ("c" + Date.now() + Math.random().toString(36).slice(2, 5));
+        if (!id)
+            donnees.createdAt = new Date().toISOString();
+        return db.collection("clients").doc(idFinal).set(donnees)
+            .then(() => rattacherPieces(idFinal, [cleNouvelle].concat(alias)))
+            .then(() => idFinal);
+    }
+    // Inscrit l'identifiant du client sur ses devis et ventes, sans toucher aux
+    // coordonnées imprimées dessus. Une fois marquée, une pièce suit la fiche
+    // quels que soient les renommages ultérieurs.
+    function rattacherPieces(clientId, cles) {
+        const db = getDb();
+        const utiles = cles.filter(Boolean);
+        if (!db || utiles.length === 0)
+            return Promise.resolve();
+        const aFaire = [];
+        (quotes || []).forEach((d) => { if (!d.clientId && utiles.indexOf(cleClient(d.client)) !== -1) aFaire.push(["quotes", d.id]); });
+        (sales || []).forEach((v) => { if (!v.clientId && utiles.indexOf(cleClient(v.client)) !== -1) aFaire.push(["sales", v.id]); });
+        if (aFaire.length === 0)
+            return Promise.resolve();
+        // Firestore refuse au-delà de 500 écritures par lot : on découpe.
+        const lots = [];
+        for (let i = 0; i < aFaire.length; i += 400) {
+            const lot = db.batch();
+            aFaire.slice(i, i + 400).forEach((e) => lot.update(db.collection(e[0]).doc(e[1]), { clientId: clientId }));
+            lots.push(lot.commit());
+        }
+        return Promise.all(lots);
     }
     function deleteClient(id) {
         const db = getDb();
@@ -2352,15 +2532,6 @@ function App() {
         if (!db)
             return Promise.reject(new Error("Pas de connexion."));
         return db.collection("sales").doc(id).update({ client: client });
-    }
-    function factureDepuisVente(v) {
-        return {
-            numero: v.numero || "Sans numéro",
-            createdAt: v.timestamp || new Date().toISOString(),
-            client: v.client || {},
-            vendeur: v.vendeur || "",
-            lignes: (v.items || []).map((it) => ({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })),
-        };
     }
     function openNewProduct() { setFormError(null); setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture", tgc: 0, ean: "" }); setEditing("new"); }
     function openEditProduct(p) { setFormError(null); setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category, tgc: p.tgc || 0, ean: p.ean || "" }); setEditing(p.id); }
@@ -3508,6 +3679,18 @@ const DELAIS_PAIEMENT = [[0, "Comptant"], [15, "15 jours"], [30, "30 jours"], [4
 // La clé de rattachement est la même que celle du carnet : société sinon nom.
 // C'est ce qui permet aux devis et ventes déjà saisis à la main de remonter
 // dans la fiche sans aucune reprise de données.
+// Une vente enregistrée devient une facture : même document que le devis, avec
+// l'en-tête et les mentions adaptés. Au niveau module, car la caisse, les stats
+// et les fiches clients en ont toutes besoin.
+function factureDepuisVente(v) {
+    return {
+        numero: v.numero || "Sans numéro",
+        createdAt: v.timestamp || new Date().toISOString(),
+        client: v.client || {},
+        vendeur: v.vendeur || "",
+        lignes: (v.items || []).map((it) => ({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })),
+    };
+}
 function cleClient(c) { return c ? normaliser(c.societe || c.nom || "") : ""; }
 function nomClient(c) { return c ? (c.societe || c.nom || "Sans nom") : "Sans nom"; }
 function sousTitreClient(c) { return c && c.societe && c.nom ? c.nom : ""; }
@@ -3589,6 +3772,11 @@ function construireCarnet(quotes, sales, clients) {
     // Les fiches enregistrées passent en dernier avec une date maximale : ce
     // que tu as saisi dans la fiche doit primer sur un vieux devis.
     (clients || []).forEach((c) => ajouter(c, "9999", c.id));
+    // Un ancien nom repris dans une fiche renommée ne doit plus être proposé
+    // séparément : sinon la même mairie apparaîtrait deux fois dans la liste.
+    const anciens = new Set();
+    (clients || []).forEach((c) => (c.alias || []).forEach((a) => { if (a && a !== cleClient(c)) anciens.add(a); }));
+    anciens.forEach((a) => par.delete(a));
     return Array.from(par.values()).sort((a, b) => String(a.societe || a.nom).localeCompare(String(b.societe || b.nom)));
 }
 /* ---------- Saisie d'un client, avec propositions ---------- */
@@ -3653,8 +3841,10 @@ function ChampsClient({ valeur, setValeur, carnet, compact }) {
    liste, et à défaut par nom normalisé. C'est ce second chemin qui fait
    remonter tout l'historique saisi avant l'existence des fiches. */
 function documentsDuClient(fiche, quotes, sales) {
-    const cle = cleClient(fiche);
-    const memeClient = (d) => (fiche.id && d.clientId === fiche.id) || (cle && cleClient(d.client) === cle);
+    // Le nom d'aujourd'hui, plus tous ceux que le client a portés avant : une
+    // facture déjà émise garde le nom imprimé, mais reste rattachée à la fiche.
+    const cles = [cleClient(fiche)].concat(fiche.alias || []).filter(Boolean);
+    const memeClient = (d) => (fiche.id && d.clientId === fiche.id) || cles.indexOf(cleClient(d.client)) !== -1;
     return {
         devis: (quotes || []).filter(memeClient).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))),
         ventes: (sales || []).filter(memeClient).sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))),
@@ -3679,10 +3869,15 @@ function ClientsView({ clients, quotes, sales, carnet, saveClient, deleteClient,
     // devis : sans ça, l'écran paraîtrait vide au premier lancement.
     const listeComplete = useMemo(() => {
         const parCle = new Map();
-        (clients || []).forEach((c) => parCle.set(cleClient(c), { ...c, enregistre: true }));
+        const dejaCouverts = new Set();
+        (clients || []).forEach((c) => {
+            parCle.set(cleClient(c), { ...c, enregistre: true });
+            dejaCouverts.add(cleClient(c));
+            (c.alias || []).forEach((a) => dejaCouverts.add(a));
+        });
         (carnet || []).forEach((c) => {
             const cle = cleClient(c);
-            if (cle && !parCle.has(cle))
+            if (cle && !dejaCouverts.has(cle))
                 parCle.set(cle, { id: "", societe: c.societe, nom: c.nom, tel: c.tel, email: c.email, enregistre: false });
         });
         return Array.from(parCle.values()).map((c) => {
@@ -3724,28 +3919,46 @@ function ClientsView({ clients, quotes, sales, carnet, saveClient, deleteClient,
             .then((id) => { setBusy(false); setOuverte({ ...form, id: id }); showToast("Fiche enregistrée."); })
             .catch((e) => { setBusy(false); showToast("⚠️ " + (e.message || "Enregistrement impossible")); });
     }
-    // Le récapitulatif reprend les lignes réelles des tickets : les taux de TGC
-    // restent justes, ce qu'un simple report du total ne permettrait pas.
-    function recapitulatif(mois) {
-        const dedans = docs.ventes.filter((v) => estSurCompte(v) && monthKeyOf(v.dateKey || String(v.timestamp || "").slice(0, 10)) === mois);
-        const lignes = [];
-        dedans.forEach((v) => (v.items || []).forEach((it) => lignes.push({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })));
-        return {
-            numero: "REC-" + mois.replace("-", ""),
+    // Un dossier = le relevé des factures dues, puis chacune de ces factures à
+    // la suite dans le même PDF. Le client reçoit une seule pièce jointe et n'a
+    // rien à réclamer pour justifier le montant.
+    function dossier(ventes, titre, numero) {
+        const releve = {
+            numero: numero,
             createdAt: new Date().toISOString(),
             client: { societe: fiche.societe || "", nom: fiche.nom || "", tel: fiche.tel || "", email: fiche.email || "", adresse: fiche.adresse || "" },
             vendeur: "",
-            objet: "Récapitulatif " + monthLabel(mois) + " — " + dedans.length + (dedans.length > 1 ? " commandes" : " commande"),
-            lignes: lignes,
+            objet: titre,
+            note: "Le détail de chaque facture figure dans les pages suivantes.",
+            recap: ventes.map((v) => ({
+                numero: v.numero || "",
+                date: dateFr(v.timestamp),
+                echeance: dateFr(echeanceDe(v)),
+                total: Math.round(Number(v.total || 0)),
+                regle: totalRegle(v),
+                reste: resteDu(v),
+                enRetard: statutReglement(v).cle === "retard",
+            })),
+            lignes: [],
         };
+        return [{ devis: releve, type: "facture" }].concat(ventes.map((v) => ({ devis: factureDepuisVente(v), type: "facture" })));
+    }
+    function ventesDuMois(mois) {
+        return docs.ventes.filter((v) => estSurCompte(v) && resteDu(v) > 0 && monthKeyOf(v.dateKey || String(v.timestamp || "").slice(0, 10)) === mois)
+            .slice().sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
+    }
+    function dossierDuMois(mois) {
+        const v = ventesDuMois(mois);
+        return dossier(v, "Relevé " + monthLabel(mois) + " — " + v.length + (v.length > 1 ? " factures" : " facture"), "REL-" + mois.replace("-", ""));
     }
     function relancer() {
-        const total = impayes.reduce((s, v) => s + resteDu(v), 0);
-        const detail = impayes.map((v) => "- " + (v.numero || "") + " du " + dateFr(v.timestamp) + " : " + fmt(resteDu(v)) + (statutReglement(v).cle === "retard" ? " (échue le " + dateFr(echeanceDe(v)) + ")" : "")).join("\n");
+        const dus = impayes.slice().sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
+        const total = dus.reduce((s, v) => s + resteDu(v), 0);
+        const detail = dus.map((v) => "- " + (v.numero || "") + " du " + dateFr(v.timestamp) + " : " + fmt(resteDu(v)) + (statutReglement(v).cle === "retard" ? " (échue le " + dateFr(echeanceDe(v)) + ")" : "")).join("\n");
         const corps = "Bonjour,\n\nSauf erreur de notre part, votre compte présente un solde de " + fmt(total) + " :\n\n" + detail
-            + "\n\nNous vous remercions de bien vouloir procéder au règlement.\n\nCordialement,\nTOTO — 1 rue Galliéni, Nouméa — Tél 45 98 23";
-        const lien = "mailto:" + encodeURIComponent(fiche.email || "") + "?subject=" + encodeURIComponent("Relance — solde de " + fmt(total) + " — TOTO") + "&body=" + encodeURIComponent(corps);
-        window.location.href = lien;
+            + "\n\nVous trouverez ci-joint le relevé détaillé et les factures correspondantes.\n\nNous vous remercions de bien vouloir procéder au règlement.\n\nCordialement,\nTOTO — 1 rue Galliéni, Nouméa — Tél 45 98 23";
+        const nom = "Releve-" + (normaliser(nomClient(fiche)).replace(/[^a-z0-9]+/g, "-") || "client") + "-" + todayKey();
+        envoyerDossier(dossier(dus, "Relevé de compte au " + dateFr(todayKey()), "REL-" + todayKey().replace(/-/g, "")), nom, "Relance — solde de " + fmt(total) + " — TOTO", corps, fiche.email, showToast);
     }
     if (fiche && form)
         return React.createElement(FicheClient, {
@@ -3768,9 +3981,13 @@ function ClientsView({ clients, quotes, sales, carnet, saveClient, deleteClient,
                         React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } }, "Regroupe toutes les commandes portées au compte sur le mois choisi."),
                         moisDisponibles.length === 0
                             ? React.createElement("div", { style: { fontSize: 13, color: TEXT_MUTED, marginBottom: 14 } }, "Aucune commande sur compte pour ce client.")
-                            : React.createElement("select", { value: moisRecap, onChange: (e) => setMoisRecap(e.target.value), style: { width: "100%", marginBottom: 14, padding: "11px 10px", borderRadius: 12, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer" } }, moisDisponibles.map((m) => React.createElement("option", { key: m, value: m }, monthLabel(m)))),
-                        moisDisponibles.length > 0 && React.createElement("button", { onClick: () => apercuDevis(recapitulatif(moisRecap), showToast, "facture"), style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
-                        moisDisponibles.length > 0 && React.createElement("button", { onClick: () => envoyerDevis(recapitulatif(moisRecap), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client"),
+                            : React.createElement("select", { value: moisRecap, onChange: (e) => setMoisRecap(e.target.value), style: { width: "100%", marginBottom: 8, padding: "11px 10px", borderRadius: 12, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer" } }, moisDisponibles.map((m) => React.createElement("option", { key: m, value: m }, monthLabel(m)))),
+                        moisDisponibles.length > 0 && React.createElement("div", { style: { fontSize: 11.5, color: ventesDuMois(moisRecap).length ? TEXT_MUTED : GOLD, marginBottom: 14 } },
+                            ventesDuMois(moisRecap).length
+                                ? ventesDuMois(moisRecap).length + (ventesDuMois(moisRecap).length > 1 ? " factures non réglées" : " facture non réglée") + " · " + fmt(ventesDuMois(moisRecap).reduce((s, v) => s + resteDu(v), 0)) + " · le détail de chacune suit le relevé"
+                                : "Tout est réglé sur ce mois : le relevé serait vide."),
+                        moisDisponibles.length > 0 && ventesDuMois(moisRecap).length > 0 && React.createElement("button", { onClick: () => apercuDossier(dossierDuMois(moisRecap), "Releve-" + moisRecap, showToast), style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
+                        moisDisponibles.length > 0 && ventesDuMois(moisRecap).length > 0 && React.createElement("button", { onClick: () => envoyerDossier(dossierDuMois(moisRecap), "Releve-" + moisRecap, "Relevé " + monthLabel(moisRecap) + " — TOTO", "Bonjour,\n\nVeuillez trouver ci-joint le relevé de " + monthLabel(moisRecap) + " ainsi que le détail des factures correspondantes, pour un total de " + fmt(ventesDuMois(moisRecap).reduce((s, v) => s + resteDu(v), 0)) + ".\n\nCordialement,\nTOTO — 45 98 23", fiche.email, showToast), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client"),
                         React.createElement("button", { onClick: () => setMoisRecap(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Fermer"))),
                 aSupprimer && React.createElement("div", { onClick: () => setASupprimer(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 85, padding: 16, background: "rgba(0,0,0,0.6)" } },
                     React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
@@ -3786,7 +4003,10 @@ function ClientsView({ clients, quotes, sales, carnet, saveClient, deleteClient,
             React.createElement(KpiCard, { label: "Dont en retard", value: fmt(totaux.retard), color: totaux.retard > 0 ? "#E86A5C" : TEXT }),
             React.createElement(KpiCard, { label: "Comptes ouverts", value: String(totaux.suivis), color: TEXT })),
         React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 14 } },
-            React.createElement("input", { value: recherche, onChange: (e) => setRecherche(e.target.value), placeholder: "Rechercher un client…", style: { flex: 1, padding: "11px 12px", borderRadius: 12, fontSize: 14, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }),
+            React.createElement("div", { style: { flex: 1, position: "relative" } },
+                React.createElement("input", { value: recherche, onChange: (e) => setRecherche(e.target.value), onKeyDown: (e) => { if (e.key === "Escape") { setRecherche(""); e.currentTarget.blur(); } }, placeholder: "Rechercher un client…", style: { width: "100%", padding: "11px 12px", paddingRight: recherche ? 38 : 12, borderRadius: 12, fontSize: 14, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }),
+                recherche && React.createElement("button", { onClick: () => setRecherche(""), title: "Effacer (Échap)", style: { position: "absolute", right: 6, top: 0, bottom: 0, width: 28, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent" } },
+                    React.createElement(Icon.X, { size: 14, color: TEXT_MUTED }))),
             React.createElement("button", { onClick: () => ouvrirFiche({ societe: "", nom: "", type: "entreprise", delaiJours: 30 }), className: "font-display", style: { padding: "11px 16px", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff", whiteSpace: "nowrap" } }, "+ Client")),
         filtres.length === 0 && React.createElement("div", { style: { padding: 30, textAlign: "center", fontSize: 13, color: TEXT_MUTED } }, recherche ? "Aucun client ne correspond." : "Aucun client pour l'instant. Crée une fiche ou fais un devis."),
         React.createElement("div", { style: { display: "grid", gap: 8 } }, filtres.map((c, i) => {
@@ -3848,7 +4068,8 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8 } },
                     React.createElement("span", { style: { fontSize: 13, color: TEXT } }, "Devis " + (d.numero || "")),
                     React.createElement("span", { className: "tabnum", style: { fontSize: 13, color: TEXT } }, fmt(d.totalTTC || 0))),
-                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2 } }, [dateFr(d.createdAt), d.objet || null].filter(Boolean).join(" · ")))),
+                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2 } }, [dateFr(d.createdAt), d.objet || null].filter(Boolean).join(" · ")),
+                React.createElement(BoutonsPiece, { onVoir: () => apercuDevis(d, showToast, "devis"), onEnvoyer: () => envoyerDevis(d, showToast, "devis") }))),
             docs.ventes.map((v) => {
                 const st = statutReglement(v);
                 return React.createElement("div", { key: "v" + v.id, style: { borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
@@ -3857,7 +4078,8 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
                         React.createElement("span", { className: "tabnum", style: { fontSize: 13, color: TEXT } }, fmt(v.total || 0))),
                     React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2, display: "flex", gap: 6, alignItems: "center" } },
                         React.createElement("span", null, [dateFr(v.timestamp), heureFr(v.timestamp), (v.items || []).length + " articles"].filter(Boolean).join(" · ")),
-                        React.createElement("span", { style: { color: st.couleur, fontWeight: 600 } }, st.label)));
+                        React.createElement("span", { style: { color: st.couleur, fontWeight: 600 } }, st.label)),
+                    React.createElement(BoutonsPiece, { onVoir: () => apercuDevis(factureDepuisVente(v), showToast, "facture"), onEnvoyer: () => envoyerDevis(factureDepuisVente(v), showToast, "facture") }));
             })),
         onglet === "regl" && React.createElement("div", null,
             impayes.length === 0 && React.createElement("div", { style: { padding: 24, textAlign: "center", fontSize: 13, color: TEXT_MUTED } }, "Rien à encaisser : tout est réglé."),
@@ -3879,6 +4101,12 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
                     React.createElement("button", { onClick: () => onReglement(v), className: "font-display", style: { width: "100%", marginTop: 6, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer un règlement"));
             }))),
         modale);
+}
+/* ---------- Deux boutons sous une pièce de l'historique ---------- */
+function BoutonsPiece({ onVoir, onEnvoyer }) {
+    return React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 8 } },
+        React.createElement("button", { onClick: onVoir, style: { flex: 1, padding: "8px 0", borderRadius: 9, fontSize: 12, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
+        React.createElement("button", { onClick: onEnvoyer, style: { flex: 1, padding: "8px 0", borderRadius: 9, fontSize: 12, fontWeight: 600, background: "transparent", color: ACCENT_GREEN, border: `1px solid ${ACCENT_GREEN}` } }, "Envoyer"));
 }
 /* ---------- Saisie d'un règlement ---------- */
 function ModaleReglement({ vente, onFermer, onValider }) {

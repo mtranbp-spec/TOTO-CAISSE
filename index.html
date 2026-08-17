@@ -1267,67 +1267,107 @@ async function exporterAchatsExcel(achats, libelle, showToast) {
         showToast("⚠️ Export impossible : " + e.message);
         return;
     }
-    // Une seule feuille, une ligne par article. Ce grain permet à la fois le
-    // total par poste comptable et le total par taux, par simple tableau
-    // croisé — ce qu'une feuille par facture ne permettait pas.
-    const lignes = [];
-    achats
-        .slice()
-        .sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")))
-        .forEach((a) => {
-            const date = dateFr(a.dateKey ? a.dateKey + "T12:00:00" : a.createdAt);
-            const arts = Array.isArray(a.lignes) ? a.lignes : [];
-            if (arts.length) {
-                arts.forEach((l) => {
-                    lignes.push({
-                        "Date": date,
-                        "Fournisseur": a.fournisseur || "",
-                        "N° facture": a.numero || "",
-                        "Poste": l.categorie || "Autre",
-                        "Article": l.designation || "",
-                        "Quantité": Number(l.quantite) || 1,
-                        "PU": arrondi2(Number(l.pu) || 0),
-                        "HT": arrondi2(Number(l.ht) || 0),
-                        "Taux TGC": (Number(l.taux) || 0) / 100,
-                        "TGC": arrondi2(Number(l.tgc) || 0),
-                        "TTC": arrondi2(Number(l.ttc) || 0),
-                    });
-                });
+    const tries = achats.slice().sort((a, b) => String(a.dateKey || "").localeCompare(String(b.dateKey || "")));
+    const dateDe = (a) => dateFr(a.dateKey ? a.dateKey + "T12:00:00" : a.createdAt);
+
+    // --- Feuille 1 : le journal, une ligne par facture, une colonne par taux ---
+    const journal = tries.map((a) => {
+        const parTaux = {};
+        TAUX_TGC.forEach((t) => { parTaux[t] = { ht: 0, tgc: 0 }; });
+        let flou = { ht: 0, tgc: 0 };
+        ventilationDe(a).forEach((l) => {
+            if (l.taux === null) {
+                flou.ht += l.ht;
+                flou.tgc += l.tgc;
                 return;
             }
-            // Facture sans articles lus : on sort une ligne par taux pour ne
-            // rien perdre des montants, et le poste reste à renseigner.
-            ventilationDe(a).forEach((v) => {
-                lignes.push({
-                    "Date": date,
-                    "Fournisseur": a.fournisseur || "",
-                    "N° facture": a.numero || "",
-                    "Poste": "Non ventilé",
-                    "Article": "(détail non lu)",
-                    "Quantité": 1,
-                    "PU": arrondi2(v.ht + v.tgc),
-                    "HT": arrondi2(v.ht),
-                    "Taux TGC": v.taux === null ? "" : v.taux / 100,
-                    "TGC": arrondi2(v.tgc),
-                    "TTC": arrondi2(v.ht + v.tgc),
-                });
+            if (!parTaux[l.taux])
+                parTaux[l.taux] = { ht: 0, tgc: 0 };
+            parTaux[l.taux].ht += l.ht;
+            parTaux[l.taux].tgc += l.tgc;
+        });
+        const ligne = {
+            "Date": dateDe(a),
+            "Fournisseur": a.fournisseur || "",
+            "N° facture": a.numero || "",
+            "Total HT": arrondi2(a.ht || 0),
+        };
+        TAUX_TGC.forEach((t) => {
+            ligne["Base " + t + " %"] = arrondi2(parTaux[t].ht);
+            if (t > 0)
+                ligne["TGC " + t + " %"] = arrondi2(parTaux[t].tgc);
+        });
+        ligne["Base à préciser"] = arrondi2(flou.ht);
+        ligne["TGC à préciser"] = arrondi2(flou.tgc);
+        ligne["Total TGC"] = arrondi2(a.tgc || 0);
+        ligne["Total TTC"] = arrondi2(a.ttc || 0);
+        ligne["Note"] = a.note || "";
+        return ligne;
+    });
+    if (journal.length) {
+        const t = { "Date": "", "Fournisseur": "TOTAL — " + (libelle || ""), "N° facture": "" };
+        Object.keys(journal[0]).forEach((k) => {
+            if (typeof journal[0][k] === "number")
+                t[k] = arrondi2(journal.reduce((s, l) => s + (Number(l[k]) || 0), 0));
+        });
+        t["Note"] = "";
+        journal.push(t);
+    }
+
+    // --- Feuille 2 : le détail par poste comptable, une ligne par facture et
+    //     par poste. C'est le grain qui permet de ventiler les charges. ---
+    const postes = [];
+    tries.forEach((a) => {
+        const arts = Array.isArray(a.lignes) ? a.lignes : [];
+        if (!arts.length) {
+            postes.push({
+                "Date": dateDe(a), "Fournisseur": a.fournisseur || "", "N° facture": a.numero || "",
+                "Poste": "Non ventilé", "Articles": 0,
+                "HT": arrondi2(a.ht || 0), "TGC": arrondi2(a.tgc || 0), "TTC": arrondi2(a.ttc || 0),
+            });
+            return;
+        }
+        const m = new Map();
+        arts.forEach((l) => {
+            const c = l.categorie || "Autre";
+            const e = m.get(c) || { ht: 0, tgc: 0, ttc: 0, nb: 0 };
+            e.ht += Number(l.ht) || 0;
+            e.tgc += Number(l.tgc) || 0;
+            e.ttc += Number(l.ttc) || 0;
+            e.nb++;
+            m.set(c, e);
+        });
+        Array.from(m.entries()).sort((x, y) => y[1].ht - x[1].ht).forEach(([c, e]) => {
+            postes.push({
+                "Date": dateDe(a), "Fournisseur": a.fournisseur || "", "N° facture": a.numero || "",
+                "Poste": c, "Articles": e.nb,
+                "HT": arrondi2(e.ht), "TGC": arrondi2(e.tgc), "TTC": arrondi2(e.ttc),
             });
         });
-    if (lignes.length) {
-        const t = { "Date": "", "Fournisseur": "TOTAL " + (libelle || ""), "N° facture": "", "Poste": "", "Article": "", "Quantité": "", "PU": "", "HT": 0, "Taux TGC": "", "TGC": 0, "TTC": 0 };
-        lignes.forEach((l) => {
-            t["HT"] = arrondi2(t["HT"] + (Number(l["HT"]) || 0));
-            t["TGC"] = arrondi2(t["TGC"] + (Number(l["TGC"]) || 0));
-            t["TTC"] = arrondi2(t["TTC"] + (Number(l["TTC"]) || 0));
+    });
+    if (postes.length) {
+        postes.push({
+            "Date": "", "Fournisseur": "TOTAL — " + (libelle || ""), "N° facture": "", "Poste": "", "Articles": "",
+            "HT": arrondi2(postes.reduce((s, l) => s + (Number(l["HT"]) || 0), 0)),
+            "TGC": arrondi2(postes.reduce((s, l) => s + (Number(l["TGC"]) || 0), 0)),
+            "TTC": arrondi2(postes.reduce((s, l) => s + (Number(l["TTC"]) || 0), 0)),
         });
-        lignes.push(t);
     }
+
     const classeur = XLSX.utils.book_new();
-    const feuille = XLSX.utils.json_to_sheet(lignes.length ? lignes : [{ "Aucune facture": "" }]);
-    feuille["!cols"] = [11, 26, 14, 17, 34, 9, 10, 11, 9, 11, 11].map((w) => ({ wch: w }));
-    feuille["!freeze"] = { xSplit: 0, ySplit: 1 };
-    XLSX.utils.book_append_sheet(classeur, feuille, "Achats détaillés");
-    const nom = "TOTO-achats-" + String(libelle || "export").replace(/[^\w-]+/g, "-").toLowerCase() + "-" + todayKey() + ".xlsx";
+    const ajouter = (donnees, nom, largeurs, gel) => {
+        const f = XLSX.utils.json_to_sheet(donnees.length ? donnees : [{ "Aucune facture": "" }]);
+        f["!cols"] = largeurs.map((w) => ({ wch: w }));
+        f["!freeze"] = gel;
+        XLSX.utils.book_append_sheet(classeur, f, nom);
+    };
+    const lJournal = [11, 28, 15, 12];
+    TAUX_TGC.forEach((t) => { lJournal.push(11); if (t > 0) lJournal.push(11); });
+    lJournal.push(14, 14, 12, 12, 22);
+    ajouter(journal, "Journal des achats", lJournal, { xSplit: 3, ySplit: 1 });
+    ajouter(postes, "Détail par poste", [11, 28, 15, 18, 9, 12, 11, 12], { xSplit: 0, ySplit: 1 });
+
+    const nom = "TOTO-achats-" + String(libelle || "export").replace(/[^\w-]+/g, "-").toLowerCase() + ".xlsx";
     try {
         XLSX.writeFile(classeur, nom);
         showToast("Export « " + nom + " » généré");

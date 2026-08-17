@@ -17,14 +17,34 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  :root { --toto-tabbar: 60px; }
-  html, body { margin: 0; padding: 0; background: #161311; overscroll-behavior: none; }
-  body { font-family: 'Inter', sans-serif; color: #F3EAD9; }
+  :root {
+    color-scheme: dark;
+    --toto-tabbar: 60px;
+    --bg: #161311;
+    --panel: #221D1A;
+    --line: #3A322C;
+    --ink: #0C0A09;
+    --text: #F3EAD9;
+    --text-muted: #9C9186;
+  }
+  [data-theme="clair"] {
+    color-scheme: light;
+    --bg: #FAF7F2;
+    --panel: #FFFFFF;
+    --line: #E2DCD2;
+    /* --ink reste sombre en thème clair : c'est le fond du toast, qui garde
+       un texte blanc. Le mettre en blanc rendrait le message illisible. */
+    --ink: #2A2420;
+    --text: #1E1A17;
+    --text-muted: #7A7168;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); overscroll-behavior: none; transition: background 200ms ease; }
+  body { font-family: 'Inter', sans-serif; color: var(--text); }
   .font-display { font-family: 'Fredoka', sans-serif; }
   .tabnum { font-variant-numeric: tabular-nums; }
   #root { min-height: 100vh; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.35); border-radius: 999px; }
   button { font-family: inherit; cursor: pointer; border: none; }
   input { font-family: inherit; }
   /* Mode réorganisation : léger tremblement, comme sur l'écran d'accueil iOS. */
@@ -76,7 +96,7 @@
       display: flex; align-items: center; justify-content: center;
       position: fixed; top: calc(8px + env(safe-area-inset-top)); left: 50%;
       width: 38px; height: 38px; border-radius: 999px;
-      background: #221D1A; border: 1px solid #3A322C;
+      background: var(--panel); border: 1px solid var(--line);
       z-index: 45; pointer-events: none;
       transform: translate(-50%, 0);
     }
@@ -123,7 +143,7 @@
       z-index: 40;
       border-radius: 0 !important;
       padding: 6px 6px calc(6px + env(safe-area-inset-bottom)) !important;
-      border-top: 1px solid #3A322C;
+      border-top: 1px solid var(--line);
       box-shadow: 0 -8px 24px rgba(0,0,0,0.45);
     }
     .toto-tabs > button {
@@ -208,12 +228,14 @@
 "use strict";
 const { useState, useEffect, useLayoutEffect, useMemo, useRef } = React;
 /* ---------- Design tokens (identité TOTO) ---------- */
-const BG = "#161311";
-const PANEL = "#221D1A";
-const LINE = "#3A322C";
-const INK = "#0C0A09";
-const TEXT = "#F3EAD9";
-const TEXT_MUTED = "#9C9186";
+// Ces cinq couleurs changent avec le thème : on passe par des variables CSS
+// plutôt que par des valeurs figées, ce qui évite de réécrire chaque style.
+const BG = "var(--bg)";
+const PANEL = "var(--panel)";
+const LINE = "var(--line)";
+const INK = "var(--ink)";
+const TEXT = "var(--text)";
+const TEXT_MUTED = "var(--text-muted)";
 const ACCENT = "#C2352A";
 const ACCENT_GREEN = "#3EA283";
 const GOLD = "#E8B44A";
@@ -320,6 +342,13 @@ const Icon = {
     Lock: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("rect", { x: "4", y: "11", width: "16", height: "10", rx: "2", stroke: p.color || "#fff", strokeWidth: "2" }),
         React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    // Trois curseurs : l'engrenage sert déjà à l'onglet Produits, il fallait
+    // une icône distincte pour ne pas confondre les deux boutons.
+    Reglages: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M4 7h16M4 12h16M4 17h16", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" }),
+        React.createElement("circle", { cx: "9", cy: "7", r: "2.2", fill: p.color || "#fff" }),
+        React.createElement("circle", { cx: "15", cy: "12", r: "2.2", fill: p.color || "#fff" }),
+        React.createElement("circle", { cx: "8", cy: "17", r: "2.2", fill: p.color || "#fff" })),
 };
 /* ---------- Devis : PDF et partage ---------- */
 // Le logo est chargé une fois puis gardé en mémoire : le relire à chaque
@@ -1658,6 +1687,12 @@ function App() {
     const [libreTicket, setLibreTicket] = useState(null);
     const [factureEditee, setFactureEditee] = useState(null);
     const [prixEnEdition, setPrixEnEdition] = useState(null);
+    // Réglages propres à l'appareil : la tablette du comptoir et le téléphone
+    // du gérant n'ont pas les mêmes besoins d'affichage ni de verrouillage.
+    const [theme, setTheme] = useState(() => { try { return localStorage.getItem("toto-theme") || "sombre"; } catch (e) { return "sombre"; } });
+    const [minutesVerrou, setMinutesVerrou] = useState(() => { try { return Number(localStorage.getItem("toto-verrou") || 0); } catch (e) { return 0; } });
+    const [reglages, setReglages] = useState(false);
+    const [changePin, setChangePin] = useState(null);
     const [camera, setCamera] = useState(false);
     const [recherchePos, setRecherchePos] = useState("");
     const [cameraEan, setCameraEan] = useState(false);
@@ -1731,6 +1766,56 @@ function App() {
         return () => window.removeEventListener("keydown", onKey);
     }, [editing, reorderPos]);
     useEffect(() => { try { localStorage.setItem("toto-vendeur", vendeur || ""); } catch (e) { } }, [vendeur]);
+    useEffect(() => {
+        try {
+            localStorage.setItem("toto-theme", theme);
+        }
+        catch (e) { }
+        document.documentElement.setAttribute("data-theme", theme === "clair" ? "clair" : "sombre");
+        const m = document.querySelector('meta[name="theme-color"]');
+        if (m)
+            m.setAttribute("content", theme === "clair" ? "#FAF7F2" : "#161311");
+    }, [theme]);
+    useEffect(() => { try { localStorage.setItem("toto-verrou", String(minutesVerrou)); } catch (e) { } }, [minutesVerrou]);
+    // Verrouillage sur inactivité : toute action repousse l'échéance. Zéro
+    // désactive la fonction, ce qui reste le bon réglage pour un poste de
+    // comptoir surveillé en permanence.
+    useEffect(() => {
+        if (!minutesVerrou)
+            return;
+        let minuteur = null;
+        const armer = () => {
+            if (minuteur)
+                clearTimeout(minuteur);
+            minuteur = setTimeout(() => {
+                const a = getAuth();
+                if (a)
+                    a.signOut();
+            }, minutesVerrou * 60000);
+        };
+        const evts = ["pointerdown", "keydown", "wheel", "touchstart"];
+        evts.forEach((e) => window.addEventListener(e, armer, { passive: true }));
+        armer();
+        return () => {
+            if (minuteur)
+                clearTimeout(minuteur);
+            evts.forEach((e) => window.removeEventListener(e, armer));
+        };
+    }, [minutesVerrou]);
+    // Changer le code : Firebase exige une ré-authentification récente avant
+    // de toucher au mot de passe. On redemande donc l'ancien code, ce qui
+    // protège aussi la caisse laissée déverrouillée sur le comptoir.
+    function changerCodeAcces(ancien, nouveau) {
+        const a = getAuth();
+        if (!a || !a.currentUser)
+            return Promise.reject(new Error("Caisse verrouillée."));
+        const email = a.currentUser.email;
+        const cred = firebase.auth.EmailAuthProvider.credential(email, ancien);
+        return a.currentUser.reauthenticateWithCredential(cred)
+            .catch(() => { throw new Error("Ancien code incorrect."); })
+            .then(() => a.currentUser.updatePassword(nouveau))
+            .catch((e) => { throw new Error(e && e.message === "Ancien code incorrect." ? e.message : "Nouveau code refusé (6 caractères minimum)."); });
+    }
     function ajouterVendeur(nom) {
         const db = getDb();
         const propre = String(nom || "").trim();
@@ -2266,7 +2351,9 @@ function App() {
                     React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis"),
                     React.createElement(TabButton, { active: view === "achats", onClick: () => setView("achats"), icon: React.createElement(Icon.Panier, { size: 13 }) }, "Achats")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
-                    React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
+                    React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })),
+                React.createElement("button", { onClick: () => setReglages(true), title: "Paramètres", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
+                    React.createElement(Icon.Reglages, { size: 15, color: TEXT_MUTED })))),
         view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, carnet: carnetClients, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { annee: statsAnnee, setAnnee: setStatsAnnee, mois: statsMois, setMois: setStatsMois, anneesVentes: anneesVentes, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts, majClientVente: majClientVente, carnet: carnetClients })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement(BarreDefilante, { actif: !reorderPos, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
@@ -2310,7 +2397,7 @@ function App() {
                 React.createElement("div", { className: "toto-ticket-card", style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
                     React.createElement("div", { className: "toto-ticket-head", style: { padding: "10px 12px", borderBottom: `1px dashed ${LINE}` } },
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8 } },
-                            React.createElement("select", { value: vendeur, onChange: (e) => setVendeur(e.target.value), style: { flex: 1, padding: "7px 10px", borderRadius: 8, fontSize: 12, background: BG, color: vendeur ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                            React.createElement("select", { value: vendeur, onChange: (e) => setVendeur(e.target.value), style: { flex: 1, padding: "7px 10px", borderRadius: 8, fontSize: 12, background: BG, color: vendeur ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "light dark" } },
                                 React.createElement("option", { value: "" }, "Vendeur…"),
                                 vendeurs.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((v) => React.createElement("option", { key: v.id, value: v.name }, v.name))),
                             React.createElement("button", { onClick: () => setNouveauVendeur(""), title: "Nouveau vendeur", style: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
@@ -2398,7 +2485,7 @@ function App() {
                         React.createElement("input", { value: libreTicket.price, inputMode: "numeric", onChange: (e) => setLibreTicket({ ...libreTicket, price: e.target.value }), style: { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "0" })),
                     React.createElement("div", { style: { width: 96 } },
                         React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "TGC"),
-                        React.createElement("select", { value: libreTicket.tgc, onChange: (e) => setLibreTicket({ ...libreTicket, tgc: Number(e.target.value) }), style: { width: "100%", marginTop: 4, padding: "10px 8px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %"))))),
+                        React.createElement("select", { value: libreTicket.tgc, onChange: (e) => setLibreTicket({ ...libreTicket, tgc: Number(e.target.value) }), style: { width: "100%", marginTop: 4, padding: "10px 8px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "light dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %"))))),
                 React.createElement("button", { onClick: () => { if (ajouterLibreAuTicket(libreTicket.name, libreTicket.price, libreTicket.tgc)) setLibreTicket(null); }, className: "font-display", style: { width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Ajouter au ticket"),
                 React.createElement("button", { onClick: () => setLibreTicket(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
         factureEditee && React.createElement("div", { onClick: () => setFactureEditee(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
@@ -2408,6 +2495,47 @@ function App() {
                 React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(factureEditee), showToast, "facture"), style: { width: "100%", padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
                 React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(factureEditee), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client"),
                 React.createElement("button", { onClick: () => setFactureEditee(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Client suivant"))),
+        reglages && React.createElement("div", { onClick: () => setReglages(false), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 70, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 380, maxHeight: "85vh", overflowY: "auto", borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
+                    React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT } }, "Paramètres"),
+                    React.createElement("button", { onClick: () => setReglages(false), style: { display: "flex", padding: 4 } }, React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 8 } }, "Apparence"),
+                React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 20 } },
+                    ["sombre", "clair"].map((t) => React.createElement("button", { key: t, onClick: () => setTheme(t), style: { flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: theme === t ? ACCENT : "transparent", color: theme === t ? "#fff" : TEXT, border: `1px solid ${theme === t ? ACCENT : LINE}` } }, t === "sombre" ? "Noir" : "Blanc"))),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 8 } }, "Verrouillage automatique"),
+                React.createElement("select", { value: minutesVerrou, onChange: (e) => setMinutesVerrou(Number(e.target.value)), style: { width: "100%", padding: "11px 10px", borderRadius: 12, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer" } },
+                    [[0, "Jamais"], [1, "1 minute"], [2, "2 minutes"], [5, "5 minutes"], [10, "10 minutes"], [15, "15 minutes"], [30, "30 minutes"], [60, "1 heure"]].map((o) => React.createElement("option", { key: o[0], value: o[0] }, o[1]))),
+                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 6, marginBottom: 20 } }, minutesVerrou ? "La caisse se verrouille après " + minutesVerrou + (minutesVerrou > 1 ? " minutes" : " minute") + " sans activité, sur cet appareil." : "La caisse reste ouverte tant que tu ne la verrouilles pas."),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 8 } }, "Sécurité"),
+                React.createElement("button", { onClick: () => { setReglages(false); setChangePin({ ancien: "", nouveau: "", confirme: "", erreur: "", busy: false }); }, style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Changer le code d'accès"),
+                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 14, textAlign: "center" } }, "Le thème et le délai de verrouillage sont propres à cet appareil."))),
+        changePin && React.createElement("div", { onClick: () => setChangePin(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 75, padding: 16, background: "rgba(0,0,0,0.6)" } },
+            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 4 } }, "Changer le code d'accès"),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 16 } }, "6 caractères minimum. Le nouveau code sera demandé sur tous tes appareils."),
+                [["ancien", "Code actuel"], ["nouveau", "Nouveau code"], ["confirme", "Confirmer le nouveau code"]].map((c) => React.createElement("input", {
+                    key: c[0], type: "password", autoComplete: c[0] === "ancien" ? "current-password" : "new-password", placeholder: c[1],
+                    value: changePin[c[0]], onChange: (e) => setChangePin({ ...changePin, [c[0]]: e.target.value, erreur: "" }),
+                    style: { width: "100%", marginBottom: 10, padding: "12px 12px", borderRadius: 12, fontSize: 15, background: BG, color: TEXT, border: `1px solid ${LINE}` }
+                })),
+                changePin.erreur && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginBottom: 10 } }, changePin.erreur),
+                React.createElement("button", {
+                    disabled: changePin.busy || !changePin.ancien || changePin.nouveau.length < 6,
+                    onClick: () => {
+                        if (changePin.nouveau !== changePin.confirme) {
+                            setChangePin({ ...changePin, erreur: "Les deux nouveaux codes ne correspondent pas." });
+                            return;
+                        }
+                        setChangePin({ ...changePin, busy: true, erreur: "" });
+                        changerCodeAcces(changePin.ancien, changePin.nouveau)
+                            .then(() => { setChangePin(null); showToast("Code d'accès modifié."); })
+                            .catch((e) => setChangePin((p) => p && { ...p, busy: false, erreur: e.message }));
+                    },
+                    className: "font-display",
+                    style: { width: "100%", padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: changePin.busy || !changePin.ancien || changePin.nouveau.length < 6 ? LINE : ACCENT_GREEN, color: "#fff" }
+                }, changePin.busy ? "Modification…" : "Valider"),
+                React.createElement("button", { onClick: () => setChangePin(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
         toast && (React.createElement("div", { className: "toto-toast", style: { position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 24, padding: "10px 16px", borderRadius: 999, fontSize: 14, fontWeight: 500, background: INK, color: "#fff", border: `1px solid ${LINE}`, zIndex: 50 } }, toast))));
 }
 function TabButton({ active, onClick, children, icon }) {
@@ -2430,11 +2558,12 @@ function KpiCard({ label, value, color }) {
 }
 function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel, sousTitre, jourChoisi, setJourChoisi, trend, stats, ventes, showToast, factureDepuisVente, produits, majClientVente, carnet }) {
     const [clientEnEdition, setClientEnEdition] = useState(null);
-    // Changer de ticket referme la saisie : sans ça, les coordonnées tapées
-    // pour une vente s'affichaient encore sur la suivante.
-    useEffect(() => { setClientEnEdition(null); }, [detail && detail.id]);
     const [exportEnCours, setExportEnCours] = useState(false);
     const [detail, setDetail] = useState(null);
+    // Changer de ticket referme la saisie : sans ça, les coordonnées tapées
+    // pour une vente s'affichaient encore sur la suivante.
+    // (déclaré APRÈS `detail`, sinon la dépendance est lue avant sa création.)
+    useEffect(() => { setClientEnEdition(null); }, [detail && detail.id]);
     const ventesTriees = useMemo(() => (ventes || []).slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))), [ventes]);
     const maxCa = Math.max(1, ...trend.map((t) => t.ca));
     const bestProduit = stats.topProduits[0];
@@ -2454,7 +2583,7 @@ function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel,
             })),
         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" } },
             React.createElement("span", { style: { fontSize: 12, color: TEXT_MUTED } }, "ou un jour précis :"),
-            React.createElement("input", { type: "date", value: jourChoisi, max: todayKey(), onChange: (e) => setJourChoisi(e.target.value), style: { padding: "7px 10px", borderRadius: 8, fontSize: 13, background: BG, color: jourChoisi ? TEXT : TEXT_MUTED, border: `1px solid ${jourChoisi ? ACCENT : LINE}`, colorScheme: "dark" } }),
+            React.createElement("input", { type: "date", value: jourChoisi, max: todayKey(), onChange: (e) => setJourChoisi(e.target.value), style: { padding: "7px 10px", borderRadius: 8, fontSize: 13, background: BG, color: jourChoisi ? TEXT : TEXT_MUTED, border: `1px solid ${jourChoisi ? ACCENT : LINE}`, colorScheme: "light dark" } }),
             jourChoisi && React.createElement("button", { onClick: () => setJourChoisi(""), style: { padding: "7px 12px", borderRadius: 999, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px solid ${LINE}` } }, "Revenir au mois")),
         React.createElement("button", { onClick: () => { setExportEnCours(true); exporterExcel(ventes || [], produits || [], currentLabel, showToast).then(() => setExportEnCours(false)); }, disabled: exportEnCours, style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", marginBottom: 16, borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: exportEnCours ? TEXT_MUTED : TEXT, border: `1px solid ${LINE}` } },
             React.createElement(Icon.Export, { size: 14, color: exportEnCours ? TEXT_MUTED : ACCENT_GREEN }),
@@ -2710,873 +2839,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                 // Le <datalist> précédent filtrait ses suggestions sur le
                 // contenu du champ — un produit déjà en « Friture » ne voyait
                 // donc plus jamais les autres.
-                React.createElement("select", { value: montrerLibre ? "__autre__" : (form.category || ""), onChange: (e) => { const v = e.target.value; if (v === "__autre__") { setCatLibre(true); setForm({ ...form, category: "" }); } else { setCatLibre(false); setForm({ ...form, category: v }); } }, style: { width: "100%", marginTop: 4, marginBottom: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
-                    React.createElement("option", { value: "", disabled: true }, "Choisir une catégorie…"),
-                    categories.map((c) => React.createElement("option", { key: c, value: c }, c)),
-                    React.createElement("option", { value: "__autre__" }, "+ Autre catégorie…")),
-                montrerLibre && React.createElement("input", { value: form.category, autoFocus: true, onChange: (e) => setForm({ ...form, category: e.target.value }), style: { width: "100%", marginTop: 8, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Nom de la nouvelle catégorie" }),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "TGC"),
-                // Cinq taux seulement : des pastilles vont plus vite qu'une liste.
-                React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 } }, TAUX_TGC.map((t) => {
-                    const choisi = (Number(form.tgc) || 0) === t;
-                    return React.createElement("button", { key: t, onClick: () => setForm({ ...form, tgc: t }), style: { padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: choisi ? ACCENT_GREEN : BG, color: choisi ? "#fff" : TEXT_MUTED, border: `1px solid ${choisi ? ACCENT_GREEN : LINE}` } }, t + " %");
-                })),
-                // Rappel du calcul : le prix saisi est TTC, la taxe en est extraite.
-                (() => {
-                    const pv = parseFloat(String(form.price).replace(",", "."));
-                    const tx = Number(form.tgc) || 0;
-                    if (!isFinite(pv) || pv <= 0 || tx === 0)
-                        return null;
-                    return React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 8 } },
-                        "Prix TTC " + fmt(pv) + " → " + fmt(htDepuisTTC(pv, tx)) + " HT + " + fmt(tgcDepuisTTC(pv, tx)) + " de TGC");
-                })(),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED, display: "block", marginTop: 14 } }, "Code-barres (EAN)"),
-                React.createElement("div", { style: { position: "relative", marginTop: 4 } },
-                    React.createElement("input", { value: form.ean || "", onChange: (e) => { setFormError(null); setForm({ ...form, ean: chiffresSeuls(e.target.value) }); }, inputMode: "numeric", autoCorrect: "off", spellCheck: false, style: { width: "100%", padding: "10px 12px", paddingRight: 46, borderRadius: 8, fontSize: 15, letterSpacing: 1.5, background: BG, color: TEXT, border: `1px solid ${formError ? ACCENT : LINE}` }, placeholder: "Clique ici puis scanne l'article" }),
-                    React.createElement("button", { onClick: ouvrirCameraEan, title: "Scanner avec l'appareil photo", className: "toto-cam-mobile", style: { position: "absolute", right: 5, top: 5, width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
-                        React.createElement(Icon.Camera, { size: 15, color: TEXT_MUTED }))),
-                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 4 } }, "Laisse vide pour un plat maison, qui n'a pas de code."),
-                formError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 8 } }, formError),
-                React.createElement("button", { onClick: submitProductForm, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer"),
-                editing !== "new" && (confirmSuppr
-                    ? React.createElement("div", { style: { marginTop: 12, padding: 14, borderRadius: 12, background: BG, border: `1px solid #C2352A` } },
-                        React.createElement("div", { style: { fontSize: 13, color: TEXT, marginBottom: 4 } },
-                            "Supprimer « ",
-                            form.name || "ce produit",
-                            " » ?"),
-                        React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginBottom: 12 } }, "Définitif. Les ventes déjà encaissées ne sont pas modifiées."),
-                        React.createElement("button", { onClick: () => deleteProduct(editing), className: "font-display", style: { width: "100%", padding: "11px 0", borderRadius: 10, fontSize: 14, fontWeight: 600, background: "#C2352A", color: "#fff" } }, "Supprimer définitivement"),
-                        React.createElement("button", { onClick: () => setConfirmSuppr(false), style: { width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Annuler"))
-                    : React.createElement("button", { onClick: () => setConfirmSuppr(true), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer ce produit"))))),
-        catForm && (React.createElement("div", { onClick: () => { setCatForm(null); setConfirmPin(null); setCatError(null); }, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.5)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, confirmPin !== null ? "Supprimer la catégorie" : catForm.id ? "Modifier la catégorie" : "Nouvelle catégorie"),
-                    React.createElement("button", { onClick: () => { setCatForm(null); setConfirmPin(null); setCatError(null); }, style: { background: "transparent" } },
-                        React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
-                confirmPin !== null
-                    ? React.createElement("div", null,
-                        React.createElement("div", { style: { fontSize: 13, color: TEXT, marginBottom: 4 } },
-                            "Supprimer définitivement « ",
-                            catForm.name,
-                            " » ?"),
-                        React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } }, "Saisis ton code d'accès pour confirmer."),
-                        React.createElement("input", { value: confirmPin, type: "password", inputMode: "numeric", autoFocus: true, disabled: catBusy, onChange: (e) => setConfirmPin(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") confirmDelete(); }, style: { width: "100%", padding: "12px 16px", borderRadius: 10, fontSize: 18, letterSpacing: 6, textAlign: "center", background: BG, color: TEXT, border: `1px solid ${catError ? ACCENT : LINE}` }, placeholder: "••••••" }),
-                        catError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 10 } }, catError),
-                        React.createElement("button", { onClick: confirmDelete, disabled: catBusy || !confirmPin, className: "font-display", style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: catBusy || !confirmPin ? LINE : "#C2352A", color: catBusy || !confirmPin ? TEXT_MUTED : "#fff" } }, catBusy ? "Vérification…" : "Supprimer définitivement"),
-                        React.createElement("button", { onClick: () => { setConfirmPin(null); setCatError(null); }, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))
-                    : React.createElement("div", null,
-                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Nom"),
-                        React.createElement("input", { value: catForm.name, autoFocus: true, disabled: catBusy, onChange: (e) => setCatForm({ ...catForm, name: e.target.value }), onKeyDown: (e) => { if (e.key === "Enter") submitCatForm(); }, style: { width: "100%", marginBottom: 16, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Desserts" }),
-                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Couleur"),
-                        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 8 } }, PALETTE.map((c) => React.createElement("button", { key: c, onClick: () => setCatForm({ ...catForm, color: c }), title: c, style: { width: 32, height: 32, borderRadius: 999, background: c, border: catForm.color === c ? `3px solid ${TEXT}` : `1px solid ${LINE}` } }))),
-                        catError && React.createElement("div", { style: { fontSize: 12, color: "#E86A5C", marginTop: 12 } }, catError),
-                        React.createElement("button", { onClick: submitCatForm, disabled: catBusy || !catForm.name.trim(), className: "font-display", style: { width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: catBusy || !catForm.name.trim() ? LINE : ACCENT_GREEN, color: catBusy || !catForm.name.trim() ? TEXT_MUTED : "#fff" } }, catBusy ? "Enregistrement…" : "Enregistrer"),
-                        catForm.id && React.createElement("button", { onClick: askDelete, disabled: catBusy, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer cette catégorie")))))));
-}
-/* ---------- Vue Devis ---------- */
-function DevisView({ products, colorOf, showToast, quotes, carnet, saveQuote, deleteQuote, versCaisse }) {
-    const [onglet, setOnglet] = useState("nouveau");
-    const [client, setClient] = useState({ societe: "", nom: "", tel: "", email: "" });
-    const [lignes, setLignes] = useState([]);
-    const [validite, setValidite] = useState(30);
-    const [note, setNote] = useState("");
-    const [objet, setObjet] = useState("");
-    const [aSupprimer, setASupprimer] = useState(null);
-    const [libre, setLibre] = useState({ name: "", price: "", tgc: 6 });
-    const [recherche, setRecherche] = useState("");
-    const produitsFiltres = useMemo(() => {
-        const n = normaliser(recherchePos);
-        return n ? orderedProducts.filter((p) => normaliser(p.name).indexOf(n) !== -1) : orderedProducts;
-    }, [orderedProducts, recherchePos]);
-    const visibleProducts = useMemo(() => (activeCategory === "Toutes" || recherchePos ? produitsFiltres : produitsFiltres.filter((p) => p.category === activeCategory)), [produitsFiltres, activeCategory, recherchePos]);
-    // Une section par catégorie, dans l'ordre que tu as choisi. Les catégories
-    // vides sont omises : une entête sans produit ne ferait qu'allonger la page.
-    const groupesProduits = useMemo(() => {
-        const g = categories.map((nom) => ({ nom, produits: produitsFiltres.filter((p) => p.category === nom) })).filter((x) => x.produits.length > 0);
-        const orphelins = produitsFiltres.filter((p) => !p.category || categories.indexOf(p.category) === -1);
-        if (orphelins.length)
-            g.push({ nom: "Sans catégorie", produits: orphelins });
-        return g;
-    }, [categories, produitsFiltres]);
-    const tuileProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) addToCart(p); }, className: "toto-carte", style: { width: "100%", height: "100%", minHeight: 132, textAlign: "left", borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` } },
-        React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, marginBottom: 10, flexShrink: 0, background: colorOf(p.category) } }),
-        React.createElement("div", { className: "font-display toto-nom2", style: { fontSize: 15, marginBottom: 8, color: TEXT } }, p.name),
-        React.createElement("div", { className: "tabnum toto-carte-prix", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price)));
-    const cartTotal = useMemo(() => cart.reduce((s, it) => s + it.price * it.qty, 0), [cart]);
-    const cartCount = useMemo(() => cart.reduce((n, it) => n + it.qty, 0), [cart]);
-    // Ventilation de la TGC par taux : un ticket peut mélanger des articles
-    // taxés différemment (un plat et une boisson, par exemple).
-    const ventilationTgc = useMemo(() => {
-        const m = new Map();
-        cart.forEach((it) => {
-            const taux = it.tgc || 0;
-            const e = m.get(taux) || { taux, ttc: 0 };
-            e.ttc += it.price * it.qty;
-            m.set(taux, e);
-        });
-        return Array.from(m.values())
-            .map((e) => ({ taux: e.taux, ttc: e.ttc, ht: htDepuisTTC(e.ttc, e.taux), tgc: tgcDepuisTTC(e.ttc, e.taux) }))
-            .sort((a, b) => a.taux - b.taux);
-    }, [cart]);
-    const totalTGC = useMemo(() => ventilationTgc.reduce((s, e) => s + e.tgc, 0), [ventilationTgc]);
-    const todaysCA = useMemo(() => {
-        const tk = todayKey();
-        return sales.filter((s) => s.dateKey === tk).reduce((sum, s) => sum + s.total, 0);
-    }, [sales]);
-    const costLookup = useMemo(() => {
-        const m = {};
-        products.forEach((p) => { m[p.id] = p.cost || 0; });
-        return m;
-    }, [products]);
-    function marginOfSale(sale) {
-        // La TGC encaissée n'appartient pas au commerçant : la marge se calcule
-        // sur le hors-taxe. Les ventes antérieures n'ont pas de taux, donc
-        // hors-taxe = TTC et leurs chiffres restent inchangés.
-        return sale.items.reduce((sum, it) => sum + (htDepuisTTC(it.price, it.tgc) - (costLookup[it.id] || 0)) * it.qty, 0);
-    }
-    // Statistiques par exercice et par mois, comme les achats : c'est la maille
-    // sur laquelle on compare une activité d'une année sur l'autre.
-    const anneesVentes = useMemo(() => {
-        const set = new Set(sales.map((s) => yearKeyOf(s.dateKey)).filter((x) => /^\d{4}$/.test(x)));
-        set.add(String(new Date().getFullYear()));
-        return Array.from(set).sort().reverse();
-    }, [sales]);
-    const statsData = useMemo(() => {
-        // Un jour choisi au calendrier prend le pas sur tout le reste.
-        if (jourChoisi) {
-            const currentSales = sales.filter((s) => s.dateKey === jourChoisi);
-            const [an, mo, jo] = jourChoisi.split("-").map(Number);
-            const trend = [];
-            for (let h = 0; h < 24; h++) {
-                const ca = currentSales
-                    .filter((s) => s.timestamp && new Date(s.timestamp).getHours() === h)
-                    .reduce((sum, s) => sum + s.total, 0);
-                trend.push({ key: "h" + h, label: (h % 3 === 0 ? h + "h" : ""), ca });
-            }
-            return { currentSales, trend, currentLabel: new Date(an, mo - 1, jo).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }), sousTitre: "Par heure" };
-        }
-        // Tout l'historique : une barre par année.
-        if (statsAnnee === "tout") {
-            const currentSales = sales;
-            const annees = Array.from(new Set(currentSales.map((s) => yearKeyOf(s.dateKey)))).filter(Boolean);
-            const courante = String(new Date().getFullYear());
-            if (!annees.includes(courante))
-                annees.push(courante);
-            annees.sort();
-            const trend = annees.map((k) => ({ key: k, label: k, ca: currentSales.filter((s) => yearKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0) }));
-            return { currentSales, trend, currentLabel: "Tout l'historique", sousTitre: "Par année" };
-        }
-        // Une année entière : une barre par mois.
-        if (!statsMois) {
-            const currentSales = sales.filter((s) => yearKeyOf(s.dateKey) === statsAnnee);
-            const trend = [];
-            for (let m = 1; m <= 12; m++) {
-                const k = statsAnnee + "-" + String(m).padStart(2, "0");
-                trend.push({ key: k, label: monthLabel(k), ca: currentSales.filter((s) => monthKeyOf(s.dateKey) === k).reduce((sum, s) => sum + s.total, 0) });
-            }
-            return { currentSales, trend, currentLabel: "Année " + statsAnnee, sousTitre: "Par mois" };
-        }
-        // Un mois : une barre par jour, sur le nombre exact de jours du mois.
-        const cle = statsAnnee + "-" + statsMois;
-        const currentSales = sales.filter((s) => monthKeyOf(s.dateKey) === cle);
-        const nbJours = new Date(Number(statsAnnee), Number(statsMois), 0).getDate();
-        const trend = [];
-        for (let j = 1; j <= nbJours; j++) {
-            const k = cle + "-" + String(j).padStart(2, "0");
-            trend.push({ key: k, label: (j === 1 || j % 5 === 0) ? String(j) : "", ca: currentSales.filter((s) => s.dateKey === k).reduce((sum, s) => sum + s.total, 0) });
-        }
-        return { currentSales, trend, currentLabel: MOIS_LONG[Number(statsMois) - 1] + " " + statsAnnee, sousTitre: "Par jour" };
-    }, [sales, statsAnnee, statsMois, jourChoisi]);
-    const periodStats = useMemo(() => {
-        const { currentSales } = statsData;
-        const ca = currentSales.reduce((sum, s) => sum + s.total, 0);
-        const marge = currentSales.reduce((sum, s) => sum + marginOfSale(s), 0);
-        const nbVentes = currentSales.length;
-        const panierMoyen = nbVentes > 0 ? ca / nbVentes : 0;
-        const byProduct = {};
-        currentSales.forEach((s) => {
-            s.items.forEach((it) => {
-                if (!byProduct[it.id])
-                    byProduct[it.id] = { name: it.name, qty: 0, ca: 0 };
-                byProduct[it.id].qty += it.qty;
-                byProduct[it.id].ca += it.price * it.qty;
-            });
-        });
-        const topProduits = Object.values(byProduct).sort((a, b) => b.qty - a.qty).slice(0, 6);
-        return { ca, marge, nbVentes, panierMoyen, topProduits };
-    }, [statsData, costLookup]);
-    function addToCart(product) {
-        setCart((prev) => {
-            const existing = prev.find((it) => it.id === product.id);
-            if (existing)
-                return prev.map((it) => (it.id === product.id ? { ...it, qty: it.qty + 1 } : it));
-            return [...prev, { id: product.id, name: product.name, price: product.price, tgc: product.tgc || 0, qty: 1 }];
-        });
-    }
-    // Une douchette USB ou Bluetooth se comporte comme un clavier : elle tape
-    // le code puis envoie Entrée, mais bien plus vite qu'un humain. C'est cette
-    // vitesse qui permet de la distinguer d'une saisie au clavier.
-    useEffect(() => {
-        if (view !== "pos" || editing || libreTicket || factureEditee || nouveauVendeur !== null)
-            return;
-        let tampon = "", debut = 0, derniere = 0, minuteur = null;
-        const LONGUEUR_MINI = 6, DUREE_MAXI = 1200, PAUSE = 400, REPOS = 160;
-        function valider() {
-            const code = tampon;
-            tampon = "";
-            if (minuteur) {
-                clearTimeout(minuteur);
-                minuteur = null;
-            }
-            if (code.length >= LONGUEUR_MINI && Date.now() - debut <= DUREE_MAXI + REPOS)
-                scanner(code);
-        }
-        function onKey(e) {
-            const c = e.target;
-            // Si un champ a le focus, la douchette y écrit : on ne s'en mêle pas.
-            if (c && c.closest && c.closest("input, textarea, select"))
-                return;
-            const t = Date.now();
-            if (e.key === "Enter") {
-                if (tampon.length >= LONGUEUR_MINI)
-                    e.preventDefault();
-                valider();
-                return;
-            }
-            if (e.key.length !== 1)
-                return;
-            if (t - derniere > PAUSE || !tampon) {
-                tampon = "";
-                debut = t;
-            }
-            tampon += chiffresSeuls(e.key);
-            derniere = t;
-            // Beaucoup de douchettes n'envoient pas Entrée tant qu'on ne les a
-            // pas configurées pour. On valide donc aussi après une courte
-            // pause, ce qui les rend utilisables telles qu'elles sortent du
-            // carton.
-            if (minuteur)
-                clearTimeout(minuteur);
-            minuteur = setTimeout(valider, REPOS);
-        }
-        window.addEventListener("keydown", onKey);
-        return () => {
-            window.removeEventListener("keydown", onKey);
-            if (minuteur)
-                clearTimeout(minuteur);
-        };
-    }, [view, editing, libreTicket, factureEditee, nouveauVendeur, products]);
-    // Renvoie true si le code correspond à un produit : le scanner par caméra
-    // s'en sert pour décider s'il se ferme ou s'il attend un autre essai.
-    function scanner(code) {
-        const propre = normaliserEan(code);
-        const p = products.find((x) => x.ean && normaliserEan(x.ean) === propre);
-        if (!p) {
-            showToast("Code inconnu : " + propre);
-            return false;
-        }
-        addToCart(p);
-        showToast(p.name + " ajouté");
-        return true;
-    }
-    function ajouterLibreAuTicket(nom, prix, taux) {
-        const pv = parseFloat(String(prix).replace(",", "."));
-        if (!String(nom).trim() || isNaN(pv) || pv < 0) {
-            showToast("Vérifie le libellé et le prix.");
-            return false;
-        }
-        setCart((prev) => [...prev, { id: "divers" + Date.now(), name: String(nom).trim(), price: pv, tgc: Number(taux) || 0, qty: 1, libre: true }]);
-        return true;
-    }
-    // Le prix modifié ne vaut que pour ce ticket : la fiche produit n'est pas
-    // touchée, sinon une remise ponctuelle changerait le tarif pour tous.
-    function changerPrixLigne(id, prix) {
-        const pv = parseFloat(String(prix).replace(",", "."));
-        if (isNaN(pv) || pv < 0)
-            return;
-        setCart((prev) => prev.map((it) => (it.id === id ? { ...it, price: pv, prixModifie: true } : it)));
-    }
-    function changeQty(id, delta) {
-        setCart((prev) => prev.map((it) => (it.id === id ? { ...it, qty: it.qty + delta } : it)).filter((it) => it.qty > 0));
-    }
-    function removeFromCart(id) { setCart((prev) => prev.filter((it) => it.id !== id)); }
-    function clearCart() { setCart([]); setClientTicket(null); setPrixEnEdition(null); }
-    function numeroFactureSuivant() {
-        const annee = new Date().getFullYear();
-        const prefixe = "F" + annee + "-";
-        const nums = sales
-            .filter((v) => typeof v.numero === "string" && v.numero.indexOf(prefixe) === 0)
-            .map((v) => parseInt(v.numero.slice(prefixe.length), 10))
-            .filter((n) => !isNaN(n));
-        return prefixe + ((nums.length ? Math.max(...nums) : 0) + 1);
-    }
-    function checkout(editer) {
-        if (cart.length === 0)
-            return;
-        const now = new Date();
-        const saleId = "s" + now.getTime();
-        const sale = {
-            numero: numeroFactureSuivant(),
-            vendeur: vendeur || "",
-            client: clientTicket || null,
-            timestamp: now.toISOString(),
-            dateKey: todayKey(),
-            // On fige le taux dans la vente : un changement de TGC plus tard ne doit
-            // pas réécrire l'histoire des tickets déjà encaissés.
-            items: cart.map((it) => ({ id: it.id, name: it.name, price: it.price, tgc: it.tgc || 0, qty: it.qty })),
-            total: cartTotal,
-        };
-        setCart([]);
-        setPrixEnEdition(null);
-        setClientTicket(null);
-        const db = getDb();
-        if (db) {
-            db.collection("sales").doc(saleId).set(sale).catch(() => {
-                showToast("⚠️ Pas de connexion — la vente sera envoyée dès le retour du réseau.");
-            });
-        }
-        if (editer)
-            setFactureEditee({ id: saleId, ...sale });
-        else
-            showToast(`Encaissé : ${fmt(sale.total)} — ${sale.numero}`);
-    }
-    // Une vente enregistrée devient une facture : même document que le devis,
-    // avec l'en-tête et les mentions adaptés.
-    const carnetClients = useMemo(() => construireCarnet(quotes, sales), [quotes, sales]);
-    function majClientVente(id, client) {
-        const db = getDb();
-        if (!db)
-            return Promise.reject(new Error("Pas de connexion."));
-        return db.collection("sales").doc(id).update({ client: client });
-    }
-    function factureDepuisVente(v) {
-        return {
-            numero: v.numero || "Sans numéro",
-            createdAt: v.timestamp || new Date().toISOString(),
-            client: v.client || {},
-            vendeur: v.vendeur || "",
-            lignes: (v.items || []).map((it) => ({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })),
-        };
-    }
-    function openNewProduct() { setFormError(null); setForm({ name: "", price: "", cost: "", category: categories[0] || "Friture", tgc: 0, ean: "" }); setEditing("new"); }
-    function openEditProduct(p) { setFormError(null); setForm({ name: p.name, price: String(p.price), cost: String(p.cost || 0), category: p.category, tgc: p.tgc || 0, ean: p.ean || "" }); setEditing(p.id); }
-    function submitProductForm() {
-        const priceNum = parseFloat(String(form.price).replace(",", "."));
-        const costNum = parseFloat(String(form.cost).replace(",", ".")) || 0;
-        if (!form.name.trim() || isNaN(priceNum) || priceNum < 0 || !form.category.trim()) {
-            showToast("Vérifie le nom, le prix et la catégorie.");
-            return;
-        }
-        // Un code-barres ne peut désigner qu'un seul produit : sinon le scan
-        // deviendrait ambigu au moment de l'encaissement.
-        const eanPropre = normaliserEan(form.ean);
-        if (eanPropre) {
-            const occupe = products.find((p) => p.ean && normaliserEan(p.ean) === eanPropre && p.id !== editing);
-            if (occupe) {
-                setFormError("Ce code-barres est déjà utilisé par « " + occupe.name + " ».");
-                return;
-            }
-        }
-        setFormError(null);
-        const db = getDb();
-        const productData = { name: form.name.trim(), price: priceNum, cost: costNum, category: form.category.trim(), tgc: Number(form.tgc) || 0, ean: eanPropre };
-        if (editing === "new") {
-            const id = "p" + Date.now();
-            // Un nouveau produit se place à la fin de la liste.
-            const ordre = orderedProducts.length ? Math.max(...orderedProducts.map((x) => (typeof x.order === "number" ? x.order : 0))) + 1 : 0;
-            if (db)
-                db.collection("products").doc(id).set({ ...productData, order: ordre }).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
-            showToast("Produit ajouté");
-        }
-        else {
-            // set() remplace le document entier : sans cette ligne, le champ
-            // d'ordre disparaissait et le produit modifié repartait en fin de
-            // liste. On reprend donc sa position actuelle.
-            const avant = products.find((x) => x.id === editing);
-            const ordre = avant && typeof avant.order === "number" ? avant.order : undefined;
-            const donnees = ordre === undefined ? productData : { ...productData, order: ordre };
-            if (db)
-                db.collection("products").doc(editing).set(donnees).catch(() => showToast("⚠️ Sauvegarde en attente de connexion..."));
-            showToast("Produit modifié");
-        }
-        setEditing(null);
-    }
-    function deleteProduct(id) {
-        const db = getDb();
-        if (db)
-            db.collection("products").doc(id).delete().catch(() => showToast("⚠️ Suppression en attente de connexion..."));
-        setEditing(null);
-        showToast("Produit supprimé");
-    }
-    return (React.createElement("div", { style: { background: BG, minHeight: "100vh" } },
-        React.createElement(TirerPourRafraichir, null),
-        React.createElement("div", { className: "toto-header", style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${LINE}` } },
-            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-                React.createElement("svg", { width: "34", height: "34", viewBox: "0 0 512 512", fill: "none" },
-                    React.createElement("circle", { cx: "256", cy: "256", r: "200", stroke: ACCENT, strokeWidth: "18" }),
-                    React.createElement("path", { d: "M170 210 C170 270 208 300 256 300 C304 300 342 270 342 210 Z", fill: ACCENT }),
-                    React.createElement("ellipse", { cx: "256", cy: "300", rx: "30", ry: "8", fill: ACCENT }),
-                    React.createElement("ellipse", { cx: "256", cy: "200", rx: "86", ry: "30", fill: TEXT }),
-                    React.createElement("line", { x1: "290", y1: "185", x2: "340", y2: "95", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" }),
-                    React.createElement("line", { x1: "305", y1: "192", x2: "360", y2: "105", stroke: ACCENT, strokeWidth: "10", strokeLinecap: "round" })),
-                React.createElement("div", { style: { display: "flex", flexDirection: "column", lineHeight: 1 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 20, color: TEXT } }, "TOTO"),
-                    React.createElement("span", { style: { fontSize: 10, letterSpacing: 2, textTransform: "uppercase", color: ACCENT } }, "Since 2004"))),
-            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-                React.createElement("div", { title: syncStatus === "live" ? "Synchronisé" : syncStatus === "connecting" ? "Connexion..." : "Hors ligne", style: { width: 8, height: 8, borderRadius: 999, background: syncStatus === "live" ? ACCENT_GREEN : syncStatus === "connecting" ? GOLD : "#C2352A" } }),
-                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: PANEL } },
-                    React.createElement(Icon.Trend, { size: 16, color: GOLD }),
-                    React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(todaysCA))),
-                React.createElement("div", { className: "toto-tabs", style: { display: "flex", alignItems: "center", borderRadius: 999, padding: 4, background: PANEL } },
-                    React.createElement(TabButton, { active: view === "pos", onClick: () => setView("pos") }, "Caisse"),
-                    React.createElement(TabButton, { active: view === "stats", onClick: () => setView("stats"), icon: React.createElement(Icon.Bar, { size: 13 }) }, "Stats"),
-                    React.createElement(TabButton, { active: view === "manage", onClick: () => setView("manage"), icon: React.createElement(Icon.Gear, { size: 13 }) }, "Produits"),
-                    React.createElement(TabButton, { active: view === "devis", onClick: () => setView("devis"), icon: React.createElement(Icon.Doc, { size: 13 }) }, "Devis"),
-                    React.createElement(TabButton, { active: view === "achats", onClick: () => setView("achats"), icon: React.createElement(Icon.Panier, { size: 13 }) }, "Achats")),
-                React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
-                    React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, carnet: carnetClients, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { annee: statsAnnee, setAnnee: setStatsAnnee, mois: statsMois, setMois: setStatsMois, anneesVentes: anneesVentes, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts, majClientVente: majClientVente, carnet: carnetClients })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
-            React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
-                React.createElement(BarreDefilante, { actif: !reorderPos, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
-                    React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-                    React.createElement(ReorderGrid, {
-                        items: categories.map((c) => ({ id: c })),
-                        active: reorderPos,
-                        onReorder: reorderCategories,
-                        gridStyle: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
-                        renderItem: (it, rangement) => React.createElement(CategoryTab, { label: it.id, active: activeCategory === it.id, color: colorOf(it.id), onClick: () => { if (!rangement) setActiveCategory(it.id); } }),
-                    }),
-                    React.createElement(RechercheProduits, { q: recherchePos, setQ: setRecherchePos, nbResultats: visibleProducts.length }),
-                    React.createElement("button", { onClick: () => setCamera(true), title: "Scanner avec l'appareil photo", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
-                        React.createElement(Icon.Camera, { size: 14, color: TEXT_MUTED }),
-                        "Scanner"),
-                    React.createElement(ReorderButton, { active: reorderPos, onClick: () => setReorderPos((v) => !v) })),
-                // En vue « Toutes », on empile une section par catégorie plutôt
-                // qu'une grille unique : en plein service, l'intertitre coloré
-                // évite de lire chaque nom pour retrouver un plat.
-                activeCategory === "Toutes" && !recherchePos
-                    ? React.createElement("div", null, groupesProduits.map((g) => React.createElement("div", { key: g.nom, style: { marginBottom: 22 } },
-                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 } },
-                            React.createElement("span", { style: { width: 10, height: 10, borderRadius: 999, flexShrink: 0, background: colorOf(g.nom) } }),
-                            React.createElement("span", { className: "font-display", style: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", whiteSpace: "nowrap", color: TEXT_MUTED } }, g.nom),
-                            React.createElement("span", { style: { flex: 1, height: 1, background: LINE } })),
-                        React.createElement(ReorderGrid, {
-                            items: g.produits,
-                            active: reorderPos,
-                            onReorder: reorderProducts,
-                            gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, alignItems: "stretch" },
-                            renderItem: tuileProduit,
-                        }))))
-                    : React.createElement(ReorderGrid, {
-                        items: visibleProducts,
-                        active: reorderPos,
-                        onReorder: reorderProducts,
-                        gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, alignItems: "stretch" },
-                        renderItem: tuileProduit,
-                    })),
-            React.createElement("div", { className: "toto-ticket", style: { width: 320, flexShrink: 0, padding: 16, paddingLeft: 0 } },
-                React.createElement("div", { className: "toto-ticket-card", style: { borderRadius: 16, background: PANEL, border: `1px solid ${LINE}`, display: "flex", flexDirection: "column" } },
-                    React.createElement("div", { className: "toto-ticket-head", style: { padding: "10px 12px", borderBottom: `1px dashed ${LINE}` } },
-                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 8 } },
-                            React.createElement("select", { value: vendeur, onChange: (e) => setVendeur(e.target.value), style: { flex: 1, padding: "7px 10px", borderRadius: 8, fontSize: 12, background: BG, color: vendeur ? TEXT : TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
-                                React.createElement("option", { value: "" }, "Vendeur…"),
-                                vendeurs.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((v) => React.createElement("option", { key: v.id, value: v.name }, v.name))),
-                            React.createElement("button", { onClick: () => setNouveauVendeur(""), title: "Nouveau vendeur", style: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
-                                React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED })),
-                            React.createElement("button", { onClick: () => setSaisieClient(clientTicket || { nom: "", societe: "", tel: "", email: "" }), title: "Client de ce ticket", style: { display: "flex", alignItems: "center", gap: 5, maxWidth: 130, padding: "7px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: clientTicket ? ACCENT : PANEL, color: clientTicket ? "#fff" : TEXT_MUTED, border: `1px solid ${clientTicket ? ACCENT : LINE}` } },
-                                React.createElement(Icon.Client, { size: 12, color: clientTicket ? "#fff" : TEXT_MUTED }),
-                                React.createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, clientTicket ? (clientTicket.societe || clientTicket.nom) : "Client"))),
-                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
-                        React.createElement(Icon.List, { size: 16, color: TEXT_MUTED }),
-                        React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT } }, "Ticket"),
-                            React.createElement("span", { style: { marginLeft: "auto", fontSize: 12, color: TEXT_MUTED } },
-                                cartCount,
-                                " article",
-                                cartCount > 1 ? "s" : ""))),
-                    React.createElement("div", { className: "toto-ticket-items", style: { padding: "8px 16px", maxHeight: 360, overflowY: "auto" } }, cart.length === 0 ? (React.createElement("div", { style: { fontSize: 12, textAlign: "center", padding: "40px 0", color: TEXT_MUTED } },
-                        "Le ticket est vide.",
-                        React.createElement("br", null),
-                        "Touche un produit pour commencer.")) : cart.map((it) => (React.createElement("div", { key: it.id, style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${LINE}` } },
-                        React.createElement("div", { style: { flex: 1, minWidth: 0 } },
-                            React.createElement("div", { style: { fontSize: 14, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, it.name),
-                            prixEnEdition === it.id
-                                ? React.createElement("input", { defaultValue: it.price, autoFocus: true, inputMode: "numeric", onBlur: (e) => { changerPrixLigne(it.id, e.target.value); setPrixEnEdition(null); }, onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setPrixEnEdition(null); }, style: { width: 84, marginTop: 2, padding: "3px 6px", borderRadius: 6, fontSize: 12, background: BG, color: TEXT, border: `1px solid ${GOLD}` } })
-                                : React.createElement("button", { onClick: () => setPrixEnEdition(it.id), title: "Modifier le prix pour ce ticket", className: "tabnum", style: { padding: 0, background: "transparent", fontSize: 12, color: it.prixModifie ? GOLD : TEXT_MUTED, textDecoration: "underline dotted" } },
-                                    fmt(it.price) + " \u00D7 " + it.qty)),
-                        React.createElement("button", { onClick: () => changeQty(it.id, -1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: LINE } },
-                            React.createElement(Icon.Minus, { size: 13, color: TEXT })),
-                        React.createElement("span", { className: "tabnum", style: { fontSize: 14, width: 16, textAlign: "center", color: TEXT } }, it.qty),
-                        React.createElement("button", { onClick: () => changeQty(it.id, 1), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: ACCENT } },
-                            React.createElement(Icon.Plus, { size: 13, color: "#fff" })),
-                        React.createElement("button", { onClick: () => removeFromCart(it.id), style: { width: 28, height: 28, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", marginLeft: 4 } },
-                            React.createElement(Icon.Trash, { size: 13, color: TEXT_MUTED })))))),
-                    React.createElement("div", { className: "toto-ticket-foot", style: { padding: "12px 16px 16px", borderTop: `1px dashed ${LINE}` } },
-                        // Le détail TGC n'apparaît que s'il y a de la taxe :
-                        // tant que les taux sont à 0, le ticket reste inchangé.
-                        totalTGC > 0 && React.createElement("div", { className: "toto-tgc", style: { marginBottom: 10, paddingBottom: 10, borderBottom: `1px dashed ${LINE}` } },
-                            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
-                                React.createElement("span", null, "Total HT"),
-                                React.createElement("span", { className: "tabnum" }, fmt(cartTotal - totalTGC))),
-                            ventilationTgc.filter((e) => e.taux > 0).map((e) => React.createElement("div", { key: e.taux, style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginBottom: 4 } },
-                                React.createElement("span", null, "TGC " + e.taux + " % sur " + fmt(e.ht)),
-                                React.createElement("span", { className: "tabnum" }, fmt(e.tgc)))),
-                            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600, color: TEXT } },
-                                React.createElement("span", null, "Dont TGC"),
-                                React.createElement("span", { className: "tabnum" }, fmt(totalTGC)))),
-                        React.createElement("div", { className: "toto-total", style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 } },
-                            React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT_MUTED } }, "TOTAL TTC"),
-                            React.createElement("span", { className: "tabnum font-display", style: { fontSize: 24, color: GOLD } }, fmt(cartTotal))),
-                        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 6 } },
-                            React.createElement("button", { onClick: () => checkout(false), disabled: cart.length === 0, className: "font-display toto-encaisser", style: { flex: 2, padding: "14px 0", borderRadius: 12, fontSize: 15, fontWeight: 600, background: cart.length === 0 ? LINE : ACCENT_GREEN, color: cart.length === 0 ? TEXT_MUTED : "#fff" } }, "Encaisser"),
-                            React.createElement("button", { onClick: () => checkout(true), disabled: cart.length === 0, title: "Encaisser puis imprimer ou envoyer la facture", className: "font-display toto-encaisser", style: { flex: 1, padding: "14px 0", borderRadius: 12, fontSize: 13, fontWeight: 600, background: cart.length === 0 ? LINE : PANEL, color: cart.length === 0 ? TEXT_MUTED : TEXT, border: `1px solid ${cart.length === 0 ? LINE : ACCENT_GREEN}` } }, "+ Facture")),
-                        React.createElement("div", { style: { display: "flex", gap: 6 } },
-                            React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
-                            cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
-        saisieClient && React.createElement("div", { onClick: () => setSaisieClient(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65, padding: 16, background: "rgba(0,0,0,0.55)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 4 } }, "Client de ce ticket"),
-                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginBottom: 14 } }, "Facultatif. Renseigné, il apparaîtra sur la facture."),
-                React.createElement(ChampsClient, { valeur: saisieClient, setValeur: setSaisieClient, carnet: carnetClients }),
-                React.createElement("button", { onClick: () => { const c = saisieClient; const vide = !((c.societe || "").trim() || (c.nom || "").trim()); setClientTicket(vide ? null : c); setSaisieClient(null); showToast(vide ? "Client retiré" : "Client enregistré sur le ticket"); }, className: "font-display", style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Valider"),
-                clientTicket && React.createElement("button", { onClick: () => { setClientTicket(null); setSaisieClient(null); showToast("Client retiré"); }, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: "#E86A5C" } }, "Retirer le client"))),
-        devisAEncaisser && React.createElement("div", { onClick: () => setDevisAEncaisser(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65, padding: 16, background: "rgba(0,0,0,0.55)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 6 } }, "Un ticket est déjà en cours"),
-                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 16 } },
-                    "Le ticket contient " + cartCount + " article" + (cartCount > 1 ? "s" : "") + " pour " + fmt(cartTotal) + ". Que faire du devis " + devisAEncaisser.numero + " ?"),
-                React.createElement("button", { onClick: () => devisVersCaisse(devisAEncaisser, "remplacer"), className: "font-display", style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" } }, "Remplacer le ticket"),
-                React.createElement("button", { onClick: () => devisVersCaisse(devisAEncaisser, "ajouter"), style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Ajouter au ticket"),
-                React.createElement("button", { onClick: () => setDevisAEncaisser(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
-        camera && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: false, onFermer: () => setCamera(false), onCode: (code) => scanner(code) }),
-        cameraEan && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: true, titre: "Scanne l'article pour enregistrer son code", onFermer: () => setCameraEan(false), onCode: (code) => { setFormError(null); setForm((f) => ({ ...f, ean: normaliserEan(code) })); showToast("Code lu : " + code); return true; } }),
-        nouveauVendeur !== null && React.createElement("div", { onClick: () => setNouveauVendeur(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Nouveau vendeur"),
-                React.createElement("input", { value: nouveauVendeur, autoFocus: true, onChange: (e) => setNouveauVendeur(e.target.value), onKeyDown: (e) => { if (e.key === "Enter") e.target.blur(); }, style: { width: "100%", padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Prénom" }),
-                React.createElement("button", { onClick: () => { const n = nouveauVendeur; ajouterVendeur(n).then(() => { setVendeur(n.trim()); setNouveauVendeur(null); showToast("Vendeur ajouté"); }).catch((e) => showToast("⚠️ " + e.message)); }, disabled: !String(nouveauVendeur).trim(), className: "font-display", style: { width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: String(nouveauVendeur).trim() ? ACCENT_GREEN : LINE, color: String(nouveauVendeur).trim() ? "#fff" : TEXT_MUTED } }, "Ajouter"),
-                React.createElement("button", { onClick: () => setNouveauVendeur(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
-        libreTicket && React.createElement("div", { onClick: () => setLibreTicket(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 12 } }, "Ligne divers"),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Libellé"),
-                React.createElement("input", { value: libreTicket.name, autoFocus: true, onChange: (e) => setLibreTicket({ ...libreTicket, name: e.target.value }), style: { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Supplément sauce" }),
-                React.createElement("div", { style: { display: "flex", gap: 8 } },
-                    React.createElement("div", { style: { flex: 1 } },
-                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Prix TTC"),
-                        React.createElement("input", { value: libreTicket.price, inputMode: "numeric", onChange: (e) => setLibreTicket({ ...libreTicket, price: e.target.value }), style: { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "0" })),
-                    React.createElement("div", { style: { width: 96 } },
-                        React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "TGC"),
-                        React.createElement("select", { value: libreTicket.tgc, onChange: (e) => setLibreTicket({ ...libreTicket, tgc: Number(e.target.value) }), style: { width: "100%", marginTop: 4, padding: "10px 8px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %"))))),
-                React.createElement("button", { onClick: () => { if (ajouterLibreAuTicket(libreTicket.name, libreTicket.price, libreTicket.tgc)) setLibreTicket(null); }, className: "font-display", style: { width: "100%", marginTop: 14, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Ajouter au ticket"),
-                React.createElement("button", { onClick: () => setLibreTicket(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
-        factureEditee && React.createElement("div", { onClick: () => setFactureEditee(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 4 } }, "Encaissé — " + fmt(factureEditee.total || 0)),
-                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 16 } }, "Facture " + factureEditee.numero + (factureEditee.vendeur ? " · " + factureEditee.vendeur : "")),
-                React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(factureEditee), showToast, "facture"), style: { width: "100%", padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
-                React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(factureEditee), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "13px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client"),
-                React.createElement("button", { onClick: () => setFactureEditee(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Client suivant"))),
-        toast && (React.createElement("div", { className: "toto-toast", style: { position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 24, padding: "10px 16px", borderRadius: 999, fontSize: 14, fontWeight: 500, background: INK, color: "#fff", border: `1px solid ${LINE}`, zIndex: 50 } }, toast))));
-}
-function TabButton({ active, onClick, children, icon }) {
-    return (React.createElement("button", { onClick: onClick, style: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: active ? ACCENT : "transparent", color: active ? "#fff" : TEXT_MUTED } },
-        icon,
-        children));
-}
-function ReorderButton({ active, onClick }) {
-    return (React.createElement("button", { onClick: onClick, title: active ? "Terminer le rangement (Échap)" : "Réorganiser les produits et les catégories", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? ACCENT_GREEN : "transparent", color: active ? "#fff" : TEXT_MUTED, border: `1px ${active ? "solid" : "dashed"} ${active ? ACCENT_GREEN : LINE}` } },
-        React.createElement(Icon.Move, { size: 14, color: active ? "#fff" : TEXT_MUTED }),
-        active ? "Terminé" : "Ranger"));
-}
-function CategoryTab({ label, active, color, onClick }) {
-    return (React.createElement("button", { onClick: onClick, style: { flexShrink: 0, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: active ? color : PANEL, color: active ? "#fff" : TEXT_MUTED, border: `1px solid ${active ? color : LINE}` } }, label));
-}
-function KpiCard({ label, value, color }) {
-    return (React.createElement("div", { style: { borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` } },
-        React.createElement("div", { style: { fontSize: 11, marginBottom: 4, color: TEXT_MUTED } }, label),
-        React.createElement("div", { className: "tabnum font-display", style: { fontSize: 18, color } }, value)));
-}
-function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel, sousTitre, jourChoisi, setJourChoisi, trend, stats, ventes, showToast, factureDepuisVente, produits, majClientVente, carnet }) {
-    const [clientEnEdition, setClientEnEdition] = useState(null);
-    const [exportEnCours, setExportEnCours] = useState(false);
-    const [detail, setDetail] = useState(null);
-    const ventesTriees = useMemo(() => (ventes || []).slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))), [ventes]);
-    const maxCa = Math.max(1, ...trend.map((t) => t.ca));
-    const bestProduit = stats.topProduits[0];
-    return (React.createElement("div", { style: { padding: 20 } },
-        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
-            (anneesVentes || []).map((an) => {
-                const actif = !jourChoisi && annee === an;
-                return React.createElement("button", { key: an, onClick: () => { setJourChoisi(""); setAnnee(an); }, style: { flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: actif ? ACCENT : PANEL, color: actif ? "#fff" : TEXT_MUTED, border: `1px solid ${actif ? ACCENT : LINE}` } }, an);
-            }),
-            React.createElement("button", { onClick: () => { setJourChoisi(""); setAnnee("tout"); setMois(""); }, style: { flexShrink: 0, padding: "8px 14px", borderRadius: 999, fontSize: 13, fontWeight: 600, background: !jourChoisi && annee === "tout" ? ACCENT : "transparent", color: !jourChoisi && annee === "tout" ? "#fff" : TEXT_MUTED, border: `1px ${!jourChoisi && annee === "tout" ? "solid" : "dashed"} ${!jourChoisi && annee === "tout" ? ACCENT : LINE}` } }, "Tout")),
-        React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
-            React.createElement("button", { onClick: () => { setJourChoisi(""); setMois(""); }, disabled: annee === "tout", style: { flexShrink: 0, padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: !mois && !jourChoisi ? PANEL : "transparent", color: annee === "tout" ? LINE : (!mois && !jourChoisi ? TEXT : TEXT_MUTED), border: `1px solid ${!mois && !jourChoisi && annee !== "tout" ? TEXT_MUTED : LINE}` } }, "Toute l'année"),
-            MOIS_LONG.map((nom, i) => {
-                const cle = String(i + 1).padStart(2, "0");
-                const actif = !jourChoisi && mois === cle && annee !== "tout";
-                return React.createElement("button", { key: cle, onClick: () => { setJourChoisi(""); setMois(cle); }, disabled: annee === "tout", title: nom + " " + annee, style: { flexShrink: 0, padding: "6px 11px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: actif ? ACCENT_GREEN : "transparent", color: annee === "tout" ? LINE : (actif ? "#fff" : TEXT_MUTED), border: `1px solid ${actif ? ACCENT_GREEN : LINE}` } }, nom.slice(0, 3));
-            })),
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 16, flexWrap: "wrap" } },
-            React.createElement("span", { style: { fontSize: 12, color: TEXT_MUTED } }, "ou un jour précis :"),
-            React.createElement("input", { type: "date", value: jourChoisi, max: todayKey(), onChange: (e) => setJourChoisi(e.target.value), style: { padding: "7px 10px", borderRadius: 8, fontSize: 13, background: BG, color: jourChoisi ? TEXT : TEXT_MUTED, border: `1px solid ${jourChoisi ? ACCENT : LINE}`, colorScheme: "dark" } }),
-            jourChoisi && React.createElement("button", { onClick: () => setJourChoisi(""), style: { padding: "7px 12px", borderRadius: 999, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px solid ${LINE}` } }, "Revenir au mois")),
-        React.createElement("button", { onClick: () => { setExportEnCours(true); exporterExcel(ventes || [], produits || [], currentLabel, showToast).then(() => setExportEnCours(false)); }, disabled: exportEnCours, style: { display: "flex", alignItems: "center", gap: 8, padding: "10px 16px", marginBottom: 16, borderRadius: 999, fontSize: 13, fontWeight: 600, background: "transparent", color: exportEnCours ? TEXT_MUTED : TEXT, border: `1px solid ${LINE}` } },
-            React.createElement(Icon.Export, { size: 14, color: exportEnCours ? TEXT_MUTED : ACCENT_GREEN }),
-            exportEnCours ? "Génération…" : "Exporter vers Excel"),
-        React.createElement("div", { style: { fontSize: 12, marginBottom: 8, color: TEXT_MUTED } }, currentLabel),
-        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 24 } },
-            React.createElement(KpiCard, { label: "Chiffre d'affaires", value: fmt(stats.ca), color: GOLD }),
-            React.createElement(KpiCard, { label: "Marge estim\u00E9e", value: fmt(stats.marge), color: ACCENT_GREEN }),
-            React.createElement(KpiCard, { label: "Ventes", value: String(stats.nbVentes), color: TEXT }),
-            React.createElement(KpiCard, { label: "Panier moyen", value: fmt(stats.panierMoyen), color: TEXT })),
-        React.createElement("div", { style: { borderRadius: 16, padding: 16, marginBottom: 24, background: PANEL, border: `1px solid ${LINE}` } },
-            React.createElement("div", { className: "font-display", style: { fontSize: 12, marginBottom: 14, color: TEXT_MUTED } },
-                "\u00C9volution du CA \u2014 " + (sousTitre || "")),
-            React.createElement("div", { style: { display: "flex", alignItems: "flex-end", gap: 6, height: 160 } }, trend.map((t) => (React.createElement("div", { key: t.key, style: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, height: "100%", justifyContent: "flex-end" }, title: fmt(t.ca) },
-                React.createElement("div", { style: { width: "100%", maxWidth: 26, borderRadius: "4px 4px 0 0", background: ACCENT, height: `${Math.max(2, (t.ca / maxCa) * 130)}px` } }),
-                React.createElement("div", { style: { fontSize: 9, color: TEXT_MUTED, transform: "rotate(0deg)" } }, t.label)))))),
-        React.createElement("div", { style: { borderRadius: 16, padding: 16, background: PANEL, border: `1px solid ${LINE}` } },
-            React.createElement("div", { className: "font-display", style: { fontSize: 12, marginBottom: 14, color: TEXT_MUTED } },
-                "Top produits \u2014 ",
-                currentLabel.toLowerCase()),
-            stats.topProduits.length === 0 ? (React.createElement("div", { style: { fontSize: 12, padding: "24px 0", textAlign: "center", color: TEXT_MUTED } }, "Aucune vente sur cette p\u00E9riode.")) : (React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, stats.topProduits.map((p, i) => (React.createElement("div", { key: p.name, style: { display: "flex", alignItems: "center", gap: 12 } },
-                React.createElement("span", { className: "tabnum", style: { fontSize: 12, width: 16, color: TEXT_MUTED } }, i + 1),
-                React.createElement("div", { style: { flex: 1 } },
-                    React.createElement("div", { style: { fontSize: 14, color: TEXT } }, p.name),
-                    React.createElement("div", { style: { height: 6, borderRadius: 999, marginTop: 4, background: LINE } },
-                        React.createElement("div", { style: { height: 6, borderRadius: 999, width: `${bestProduit ? (p.qty / bestProduit.qty) * 100 : 0}%`, background: ACCENT } }))),
-                React.createElement("div", { style: { textAlign: "right" } },
-                    React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: TEXT } }, p.qty),
-                    React.createElement("div", { className: "tabnum", style: { fontSize: 10, color: TEXT_MUTED } }, fmt(p.ca))))))))),
-        React.createElement("div", { style: { borderRadius: 16, padding: 16, marginTop: 24, background: PANEL, border: `1px solid ${LINE}` } },
-            React.createElement("div", { className: "font-display", style: { fontSize: 12, marginBottom: 14, color: TEXT_MUTED } },
-                "Tickets encaissés \u2014 " + currentLabel.toLowerCase() + " (" + ventesTriees.length + ")"),
-            ventesTriees.length === 0
-                ? React.createElement("div", { style: { fontSize: 12, padding: "24px 0", textAlign: "center", color: TEXT_MUTED } }, "Aucun ticket sur cette période.")
-                : React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } }, ventesTriees.map((v) => React.createElement("button", { key: v.id, onClick: () => setDetail(v), style: { display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
-                    React.createElement("div", { style: { flex: 1, minWidth: 0 } },
-                        React.createElement("div", { style: { fontSize: 13, color: TEXT } }, v.numero || "Sans numéro"),
-                        React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-                            [v.timestamp ? new Date(v.timestamp).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "",
-                                v.client ? (v.client.societe || v.client.nom) : null,
-                                v.vendeur || null,
-                                (v.items || []).length + " article" + ((v.items || []).length > 1 ? "s" : "")].filter(Boolean).join(" · "))),
-                    React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(v.total || 0)))))),
-        detail && React.createElement("div", { onClick: () => setDetail(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 400, maxHeight: "84vh", overflowY: "auto", borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, detail.numero || "Ticket"),
-                    React.createElement("button", { onClick: () => setDetail(null), style: { background: "transparent" } }, React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
-                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } },
-                    [detail.timestamp ? new Date(detail.timestamp).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" }) : "", detail.vendeur ? "Vendu par " + detail.vendeur : null].filter(Boolean).join(" · ")),
-                (detail.items || []).map((it, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${LINE}` } },
-                    React.createElement("span", { style: { flex: 1, fontSize: 13, color: TEXT } }, it.name),
-                    React.createElement("span", { className: "tabnum", style: { fontSize: 11, color: TEXT_MUTED, width: 62, textAlign: "right" } }, fmt(it.price) + " \u00D7 " + it.qty),
-                    React.createElement("span", { className: "tabnum", style: { fontSize: 13, fontWeight: 600, color: GOLD, width: 74, textAlign: "right" } }, fmt(it.price * it.qty)))),
-                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 13, color: TEXT_MUTED } }, "TOTAL TTC"),
-                    React.createElement("span", { className: "tabnum font-display", style: { fontSize: 20, color: GOLD } }, fmt(detail.total || 0))),
-                clientEnEdition === null
-                    ? React.createElement("button", { onClick: () => setClientEnEdition(detail.client || { societe: "", nom: "", tel: "", email: "" }), style: { display: "flex", alignItems: "center", gap: 7, width: "100%", marginTop: 14, padding: "10px 12px", borderRadius: 10, fontSize: 12.5, textAlign: "left", background: BG, color: detail.client ? TEXT : TEXT_MUTED, border: `1px ${detail.client ? "solid" : "dashed"} ${LINE}` } },
-                        React.createElement(Icon.Client, { size: 13, color: detail.client ? ACCENT : TEXT_MUTED }),
-                        React.createElement("span", { style: { flex: 1 } }, detail.client ? (detail.client.societe || detail.client.nom) : "Aucun client — en ajouter un"),
-                        React.createElement(Icon.Pencil, { size: 12, color: TEXT_MUTED }))
-                    : React.createElement("div", { style: { marginTop: 14, padding: 12, borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
-                        React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 8 } }, "Client de cette vente"),
-                        ["societe", "nom", "tel", "email"].map((k) => React.createElement("input", { key: k, value: clientEnEdition[k] || "", autoFocus: k === "societe", onChange: (e) => setClientEnEdition({ ...clientEnEdition, [k]: e.target.value }), placeholder: k === "societe" ? "Société" : k === "nom" ? "Nom du contact" : k === "tel" ? "Téléphone" : "E-mail", style: { width: "100%", marginBottom: 7, padding: "8px 10px", borderRadius: 8, fontSize: 13, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } })),
-                        React.createElement("button", { onClick: () => { const c = clientEnEdition; const vide = !((c.societe || "").trim() || (c.nom || "").trim()); majClientVente(detail.id, vide ? null : c).then(() => { setDetail({ ...detail, client: vide ? null : c }); setClientEnEdition(null); showToast(vide ? "Client retiré" : "Client enregistré"); }).catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible"))); }, className: "font-display", style: { width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer le client"),
-                        React.createElement("button", { onClick: () => setClientEnEdition(null), style: { width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Annuler")),
-                React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(detail), showToast, "facture"), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer la facture"),
-                React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(detail), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer par mail")))));
-}
-function ManageView({ products, categories, catDocs, editing, form, setForm, formError, setFormError, ouvrirCameraEan, openNewProduct, openEditProduct, submitProductForm, deleteProduct, closeForm, catColor, saveCategory, deleteCategory, countIn, showToast, reorderProducts, reorderCategories }) {
-    const [activeCategory, setActiveCategory] = useState("Toutes");
-    const [catForm, setCatForm] = useState(null); // { id, name, color } — id null = création
-    const [catBusy, setCatBusy] = useState(false);
-    const [catError, setCatError] = useState(null);
-    const [confirmPin, setConfirmPin] = useState(null); // saisie du code avant suppression
-    const [reorder, setReorder] = useState(false);
-    const [catLibre, setCatLibre] = useState(false);
-    const [recherche, setRecherche] = useState("");
-    const [confirmSuppr, setConfirmSuppr] = useState(false);
-    // Même anatomie que les tuiles de la Caisse : barre de couleur, nom sur
-    // deux lignes, prix en bas. On y ajoute la marge, utile seulement ici.
-    const carteProduit = (p, rangement) => React.createElement("button", { onClick: () => { if (!rangement) openEditProduct(p); }, className: "toto-carte", style: { width: "100%", height: "100%", minHeight: 132, textAlign: "left", borderRadius: 16, padding: 14, background: PANEL, border: `1px solid ${LINE}` } },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexShrink: 0 } },
-            React.createElement("div", { style: { width: 32, height: 6, borderRadius: 999, background: catColor(p.category) } }),
-            p.ean ? React.createElement(Icon.Code, { size: 12, color: TEXT_MUTED }) : null),
-        React.createElement("div", { className: "font-display toto-nom2", style: { fontSize: 15, marginBottom: 8, color: TEXT } }, p.name),
-        React.createElement("div", { className: "toto-carte-prix" },
-            React.createElement("div", { className: "tabnum", style: { fontSize: 10, lineHeight: 1.2, color: TEXT_MUTED } }, "marge " + fmt(p.price - (p.cost || 0))),
-            React.createElement("div", { className: "tabnum", style: { fontSize: 18, fontWeight: 700, color: GOLD } }, fmt(p.price))));
-    // On rouvre toujours le formulaire produit sur les pastilles. Le champ
-    // libre ne réapparaît que si la catégorie du produit n'existe plus.
-    useEffect(() => { setCatLibre(false); setConfirmSuppr(false); }, [editing]);
-    // Échap dans l'onglet Produits. La confirmation de suppression revient à
-    // l'écran précédent plutôt que de tout fermer : on ne perd pas la saisie
-    // en cours par un appui réflexe.
-    useEffect(() => {
-        function onKey(e) {
-            if (e.key !== "Escape")
-                return;
-            if (confirmPin !== null) {
-                setConfirmPin(null);
-                setCatError(null);
-                return;
-            }
-            if (catForm) {
-                setCatForm(null);
-                setCatError(null);
-                return;
-            }
-            if (editing)
-                return; // la fenêtre produit est gérée plus haut
-            if (reorder)
-                setReorder(false);
-        }
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [confirmPin, catForm, editing, reorder]);
-    const montrerLibre = catLibre || (!!form.category && categories.indexOf(form.category) === -1);
-    function openCatForm(doc) {
-        setCatError(null);
-        setConfirmPin(null);
-        setCatForm(doc ? { id: doc.id, name: doc.name, color: doc.color || catColor(doc.name) } : { id: null, name: "", color: PALETTE[0] });
-    }
-    function submitCatForm() {
-        if (!catForm || !catForm.name.trim() || catBusy)
-            return;
-        setCatBusy(true);
-        setCatError(null);
-        saveCategory(catForm.id, catForm.name, catForm.color)
-            .then(() => { showToast(catForm.id ? "Catégorie modifiée" : "Catégorie ajoutée"); setCatForm(null); })
-            .catch((err) => setCatError(err.message || "Enregistrement impossible."))
-            .then(() => setCatBusy(false));
-    }
-    function askDelete() {
-        const n = countIn(catForm.name);
-        if (n > 0) {
-            setCatError(`${n} produit${n > 1 ? "s utilisent" : " utilise"} cette catégorie. Déplace-${n > 1 ? "les" : "le"} avant de la supprimer.`);
-            return;
-        }
-        setCatError(null);
-        setConfirmPin("");
-    }
-    function confirmDelete() {
-        const auth = getAuth();
-        if (!auth || !auth.currentUser || catBusy)
-            return;
-        setCatBusy(true);
-        setCatError(null);
-        // On revérifie le code auprès de Firebase plutôt que de le comparer
-        // localement : le PIN n'est stocké nulle part côté navigateur.
-        const cred = firebase.auth.EmailAuthProvider.credential(auth.currentUser.email, confirmPin);
-        auth.currentUser.reauthenticateWithCredential(cred)
-            .then(() => deleteCategory(catForm.id))
-            .then(() => { showToast("Catégorie supprimée"); setCatForm(null); setConfirmPin(null); })
-            .catch((err) => {
-                const code = err && err.code ? err.code : "";
-                setCatError(code.indexOf("password") !== -1 || code.indexOf("credential") !== -1 ? "Code incorrect." : "Suppression impossible.");
-            })
-            .then(() => setCatBusy(false));
-    }
-    // Si la catégorie active disparaît (dernier produit supprimé ou renommé),
-    // on retombe sur "Toutes" plutôt que d'afficher une liste vide sans raison.
-    useEffect(() => {
-        if (activeCategory !== "Toutes" && !categories.includes(activeCategory))
-            setActiveCategory("Toutes");
-    }, [categories, activeCategory]);
-    const visibleProducts = useMemo(() => {
-        const n = normaliser(recherche);
-        const base = n ? products.filter((p) => normaliser(p.name).indexOf(n) !== -1) : products;
-        return (activeCategory === "Toutes" || n) ? base : base.filter((p) => p.category === activeCategory);
-    }, [products, activeCategory, recherche]);
-    // Même présentation que la Caisse : une section par catégorie, dans l'ordre
-    // que tu as défini. Les catégories vides sont omises.
-    const groupes = useMemo(() => {
-        const g = categories.map((nom) => ({ nom, produits: visibleProducts.filter((p) => p.category === nom) })).filter((x) => x.produits.length > 0);
-        const orphelins = visibleProducts.filter((p) => !p.category || categories.indexOf(p.category) === -1);
-        if (orphelins.length)
-            g.push({ nom: "Sans catégorie", produits: orphelins });
-        return g;
-    }, [categories, visibleProducts]);
-    return (React.createElement("div", { style: { padding: 20 } },
-        React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
-            React.createElement("span", { className: "font-display", style: { fontSize: 18, color: TEXT } },
-                "Produits (",
-                visibleProducts.length,
-                ")"),
-            React.createElement("button", { onClick: openNewProduct, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" } },
-                React.createElement(Icon.Plus, { size: 15 }),
-                " Nouveau produit")),
-        React.createElement(BarreDefilante, { actif: !reorder, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
-            React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
-            React.createElement(ReorderGrid, {
-                items: categories.map((c) => ({ id: c })),
-                active: reorder,
-                onReorder: reorderCategories,
-                gridStyle: { display: "flex", gap: 8, alignItems: "center", flexShrink: 0 },
-                renderItem: (it, rangement) => {
-                    const c = it.id;
-                    const doc = catDocs.find((d) => d.name === c);
-                    const actif = activeCategory === c;
-                    const couleur = catColor(c);
-                    return React.createElement("div", { style: { flexShrink: 0, display: "flex", alignItems: "center", borderRadius: 999, background: actif ? couleur : PANEL, border: `1px solid ${actif ? couleur : LINE}` } },
-                        React.createElement("button", { onClick: () => { if (!rangement) setActiveCategory(c); }, style: { padding: "8px 4px 8px 16px", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", background: "transparent", color: actif ? "#fff" : TEXT_MUTED } }, c),
-                        // Sans document associé (catégorie héritée d'un produit), il n'y
-                        // a rien à modifier : on n'affiche pas le crayon.
-                        doc && !rangement
-                            ? React.createElement("button", { onClick: () => openCatForm(doc), title: `Modifier « ${c} »`, style: { display: "flex", alignItems: "center", padding: "8px 12px 8px 6px", background: "transparent" } },
-                                React.createElement(Icon.Pencil, { size: 13, color: actif ? "#fff" : TEXT_MUTED }))
-                            : React.createElement("span", { style: { paddingRight: 12 } }));
-                },
-            }),
-            React.createElement(RechercheProduits, { q: recherche, setQ: setRecherche, nbResultats: visibleProducts.length }),
-            React.createElement("button", { onClick: () => openCatForm(null), title: "Nouvelle catégorie", style: { flexShrink: 0, display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 999, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } },
-                React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }),
-                "Catégorie"),
-            React.createElement(ReorderButton, { active: reorder, onClick: () => setReorder((v) => !v) })),
-        activeCategory === "Toutes" && !recherche
-            ? React.createElement("div", null, groupes.map((g) => React.createElement("div", { key: g.nom, style: { marginBottom: 18 } },
-                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 } },
-                    React.createElement("span", { style: { width: 10, height: 10, borderRadius: 999, flexShrink: 0, background: catColor(g.nom) } }),
-                    React.createElement("span", { className: "font-display", style: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", whiteSpace: "nowrap", color: TEXT_MUTED } }, g.nom),
-                    React.createElement("span", { style: { fontSize: 11, color: TEXT_MUTED } }, g.produits.length),
-                    React.createElement("span", { style: { flex: 1, height: 1, background: LINE } })),
-                React.createElement(ReorderGrid, {
-                    items: g.produits,
-                    active: reorder,
-                    onReorder: reorderProducts,
-                    gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, alignItems: "stretch" },
-                    renderItem: carteProduit,
-                }))))
-            : React.createElement(ReorderGrid, {
-                items: visibleProducts,
-                active: reorder,
-                onReorder: reorderProducts,
-                gridStyle: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, alignItems: "stretch" },
-                renderItem: carteProduit,
-            }),
-        editing && (React.createElement("div", { onClick: closeForm, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 16, background: "rgba(0,0,0,0.5)" } },
-            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 380, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
-                React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 } },
-                    React.createElement("span", { className: "font-display", style: { fontSize: 16, color: TEXT } }, editing === "new" ? "Nouveau produit" : "Modifier le produit"),
-                    React.createElement("button", { onClick: closeForm, style: { background: "transparent" } },
-                        React.createElement(Icon.X, { size: 18, color: TEXT_MUTED }))),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Nom"),
-                React.createElement("input", { value: form.name, onChange: (e) => setForm({ ...form, name: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : Nem crevette" }),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Prix de vente (F CFP)"),
-                React.createElement("input", { value: form.price, onChange: (e) => setForm({ ...form, price: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : 1200", inputMode: "numeric" }),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Co\u00FBt d'achat (F CFP)"),
-                React.createElement("input", { value: form.cost, onChange: (e) => setForm({ ...form, cost: e.target.value }), style: { width: "100%", marginBottom: 12, marginTop: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` }, placeholder: "Ex : 500", inputMode: "numeric" }),
-                React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, "Cat\u00E9gorie"),
-                // Vrai <select> : il liste toujours TOUTES les catégories.
-                // Le <datalist> précédent filtrait ses suggestions sur le
-                // contenu du champ — un produit déjà en « Friture » ne voyait
-                // donc plus jamais les autres.
-                React.createElement("select", { value: montrerLibre ? "__autre__" : (form.category || ""), onChange: (e) => { const v = e.target.value; if (v === "__autre__") { setCatLibre(true); setForm({ ...form, category: "" }); } else { setCatLibre(false); setForm({ ...form, category: v }); } }, style: { width: "100%", marginTop: 4, marginBottom: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                React.createElement("select", { value: montrerLibre ? "__autre__" : (form.category || ""), onChange: (e) => { const v = e.target.value; if (v === "__autre__") { setCatLibre(true); setForm({ ...form, category: "" }); } else { setCatLibre(false); setForm({ ...form, category: v }); } }, style: { width: "100%", marginTop: 4, marginBottom: 4, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "light dark" } },
                     React.createElement("option", { value: "", disabled: true }, "Choisir une catégorie…"),
                     categories.map((c) => React.createElement("option", { key: c, value: c }, c)),
                     React.createElement("option", { value: "__autre__" }, "+ Autre catégorie…")),
@@ -3781,7 +3044,7 @@ function DevisView({ products, colorOf, showToast, quotes, carnet, saveQuote, de
                         React.createElement("input", { value: libre.price, onChange: (e) => setLibre({ ...libre, price: e.target.value }), style: { ...champ, marginBottom: 0 }, inputMode: "numeric", placeholder: "0" })),
                     React.createElement("div", { style: { width: 92 } },
                         React.createElement("label", { style: label }, "TGC"),
-                        React.createElement("select", { value: libre.tgc, onChange: (e) => setLibre({ ...libre, tgc: Number(e.target.value) }), style: { ...champ, marginBottom: 0, cursor: "pointer", colorScheme: "dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %")))),
+                        React.createElement("select", { value: libre.tgc, onChange: (e) => setLibre({ ...libre, tgc: Number(e.target.value) }), style: { ...champ, marginBottom: 0, cursor: "pointer", colorScheme: "light dark" } }, TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %")))),
                     React.createElement("button", { onClick: ajouterLibre, style: { padding: "11px 18px", borderRadius: 10, fontSize: 14, fontWeight: 600, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }, "Ajouter")),
                 React.createElement("div", { style: { marginTop: 20, borderRadius: 14, background: PANEL, border: `1px solid ${LINE}`, overflow: "hidden" } },
                     lignes.length === 0
@@ -4639,7 +3902,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 React.createElement("div", { style: { display: "flex", gap: 10 } },
                     React.createElement("div", { style: { flex: 1 } },
                         React.createElement("label", { style: label }, "Date"),
-                        React.createElement("input", { type: "date", value: form.dateKey, onChange: (e) => setForm({ ...form, dateKey: e.target.value }), style: { ...champ, colorScheme: "dark" } })),
+                        React.createElement("input", { type: "date", value: form.dateKey, onChange: (e) => setForm({ ...form, dateKey: e.target.value }), style: { ...champ, colorScheme: "light dark" } })),
                     React.createElement("div", { style: { flex: 1 } },
                         React.createElement("label", { style: label }, "N° de facture"),
                         React.createElement("input", { value: form.numero, onChange: (e) => setForm({ ...form, numero: e.target.value }), style: champ, placeholder: "Facultatif" }))),
@@ -4667,7 +3930,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                         form.lignes.map((l, i) => React.createElement("div", { key: i, style: { display: "flex", gap: 6, padding: "7px 10px", fontSize: 11, borderBottom: i < form.lignes.length - 1 ? `1px solid ${LINE}` : "none" } },
                             React.createElement("span", { style: { flex: 1, minWidth: 0 } },
                                 React.createElement("span", { style: { display: "block", color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, l.designation),
-                                React.createElement("select", { value: l.categorie || "Autre", onChange: (e) => majArticle(i, "categorie", e.target.value), style: { marginTop: 3, padding: "2px 4px", borderRadius: 6, fontSize: 10, background: PANEL, color: TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                                React.createElement("select", { value: l.categorie || "Autre", onChange: (e) => majArticle(i, "categorie", e.target.value), style: { marginTop: 3, padding: "2px 4px", borderRadius: 6, fontSize: 10, background: PANEL, color: TEXT_MUTED, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "light dark" } },
                                     CATEGORIES_ACHAT.map((c) => React.createElement("option", { key: c, value: c }, c)))),
                             React.createElement("span", { className: "tabnum", style: { width: 26, textAlign: "right", color: TEXT_MUTED } }, l.quantite),
                             React.createElement("span", { className: "tabnum", style: { width: 56, textAlign: "right", color: TEXT_MUTED } }, fmt(l.ht || 0)),
@@ -4677,7 +3940,7 @@ function AchatsView({ achats, saveAchat, deleteAchat, showToast }) {
                 React.createElement("label", { style: label }, "Détail par taux de TGC"),
                 React.createElement("div", { style: { marginTop: 6, marginBottom: 10, borderRadius: 10, background: BG, border: `1px solid ${LINE}`, overflow: "hidden" } },
                     (form.ventilation || []).map((l, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderBottom: i < (form.ventilation || []).length - 1 ? `1px solid ${LINE}` : "none" } },
-                        React.createElement("select", { value: l.taux, onChange: (e) => majLigne(i, "taux", Number(e.target.value)), style: { width: 74, padding: "6px 6px", borderRadius: 7, fontSize: 13, background: PANEL, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "dark" } },
+                        React.createElement("select", { value: l.taux, onChange: (e) => majLigne(i, "taux", Number(e.target.value)), style: { width: 74, padding: "6px 6px", borderRadius: 7, fontSize: 13, background: PANEL, color: TEXT, border: `1px solid ${LINE}`, cursor: "pointer", colorScheme: "light dark" } },
                             TAUX_TGC.map((t) => React.createElement("option", { key: t, value: t }, t + " %"))),
                         React.createElement("input", { value: l.ht, inputMode: "decimal", onChange: (e) => majLigne(i, "ht", e.target.value), placeholder: "base HT", style: { flex: 1, minWidth: 0, padding: "6px 8px", borderRadius: 7, fontSize: 13, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } }),
                         React.createElement("input", { value: l.tgc, inputMode: "decimal", onChange: (e) => majLigne(i, "tgc", e.target.value), placeholder: "TGC", style: { width: 82, padding: "6px 8px", borderRadius: 7, fontSize: 13, background: PANEL, color: GOLD, border: `1px solid ${LINE}` } }),

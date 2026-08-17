@@ -1650,6 +1650,7 @@ function App() {
     const [catsLoaded, setCatsLoaded] = useState(false);
     const [reorderPos, setReorderPos] = useState(false);
     const [quotes, setQuotes] = useState([]);
+    const [devisAEncaisser, setDevisAEncaisser] = useState(null);
     const [achats, setAchats] = useState([]);
     const [vendeurs, setVendeurs] = useState([]);
     // Le vendeur choisi est propre à l'appareil : la tablette de la caisse et
@@ -1854,6 +1855,37 @@ function App() {
         if (!db)
             return Promise.reject(new Error("Pas de connexion."));
         return db.collection("achats").doc(id).delete();
+    }
+    // Un devis accepté devient un ticket : on recompose le panier à partir de
+    // ses lignes. On tente de retrouver le produit d'origine par son nom, pour
+    // que la vente compte dans les statistiques par article ; à défaut la
+    // ligne est reprise telle quelle.
+    function lignesDevisVersPanier(devis) {
+        return (devis.lignes || []).map((l, i) => {
+            const p = orderedProducts.find((x) => normaliser(x.name) === normaliser(l.name));
+            return {
+                id: p ? p.id : "devis" + Date.now() + i,
+                name: l.name,
+                price: l.price,
+                tgc: typeof l.tgc === "number" ? l.tgc : (p ? p.tgc || 0 : 0),
+                qty: l.qty || 1,
+                libre: !p,
+                // Un prix négocié sur devis diffère souvent du tarif courant :
+                // on le marque pour qu'il saute aux yeux dans le ticket.
+                prixModifie: !!p && p.price !== l.price,
+            };
+        });
+    }
+    function devisVersCaisse(devis, mode) {
+        const items = lignesDevisVersPanier(devis);
+        if (!items.length) {
+            showToast("Ce devis ne contient aucune ligne.");
+            return;
+        }
+        setCart((prev) => (mode === "ajouter" ? [...prev, ...items] : items));
+        setView("pos");
+        setDevisAEncaisser(null);
+        showToast("Devis " + devis.numero + " chargé — " + items.length + " ligne" + (items.length > 1 ? "s" : ""));
     }
     function saveQuote(devis) {
         const db = getDb();
@@ -2238,7 +2270,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "achats", onClick: () => setView("achats"), icon: React.createElement(Icon.Panier, { size: 13 }) }, "Achats")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { period: statsPeriod, setPeriod: setStatsPeriod, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement(BarreDefilante, { actif: !reorderPos, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -2332,6 +2364,14 @@ function App() {
                         React.createElement("div", { style: { display: "flex", gap: 6 } },
                             React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
                             cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
+        devisAEncaisser && React.createElement("div", { onClick: () => setDevisAEncaisser(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 6 } }, "Un ticket est déjà en cours"),
+                React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 16 } },
+                    "Le ticket contient " + cartCount + " article" + (cartCount > 1 ? "s" : "") + " pour " + fmt(cartTotal) + ". Que faire du devis " + devisAEncaisser.numero + " ?"),
+                React.createElement("button", { onClick: () => devisVersCaisse(devisAEncaisser, "remplacer"), className: "font-display", style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT, color: "#fff" } }, "Remplacer le ticket"),
+                React.createElement("button", { onClick: () => devisVersCaisse(devisAEncaisser, "ajouter"), style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Ajouter au ticket"),
+                React.createElement("button", { onClick: () => setDevisAEncaisser(null), style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: TEXT_MUTED } }, "Annuler"))),
         camera && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: false, onFermer: () => setCamera(false), onCode: (code) => scanner(code) }),
         cameraEan && React.createElement(ScannerCamera, { showToast: showToast, fermerApres: true, titre: "Scanne l'article pour enregistrer son code", onFermer: () => setCameraEan(false), onCode: (code) => { setFormError(null); setForm((f) => ({ ...f, ean: normaliserEan(code) })); showToast("Code lu : " + code); return true; } }),
         nouveauVendeur !== null && React.createElement("div", { onClick: () => setNouveauVendeur(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16, background: "rgba(0,0,0,0.55)" } },
@@ -2704,7 +2744,7 @@ function ManageView({ products, categories, catDocs, editing, form, setForm, for
                         catForm.id && React.createElement("button", { onClick: askDelete, disabled: catBusy, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 14, fontWeight: 500, background: "transparent", color: "#E86A5C" } }, "Supprimer cette catégorie")))))));
 }
 /* ---------- Vue Devis ---------- */
-function DevisView({ products, colorOf, showToast, quotes, saveQuote, deleteQuote }) {
+function DevisView({ products, colorOf, showToast, quotes, saveQuote, deleteQuote, versCaisse }) {
     const [onglet, setOnglet] = useState("nouveau");
     const [client, setClient] = useState({ societe: "", nom: "", tel: "", email: "" });
     const [lignes, setLignes] = useState([]);
@@ -2831,8 +2871,10 @@ function DevisView({ products, colorOf, showToast, quotes, saveQuote, deleteQuot
                         React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
                             [(d.client && (d.client.societe || d.client.nom)) || "Sans client", new Date(d.createdAt).toLocaleDateString("fr-FR")].join(" · "))),
                     React.createElement("div", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(d.totalTTC || 0)),
+                    React.createElement("button", { onClick: () => versCaisse(d), title: "Charger ce devis dans la caisse pour l'encaisser", style: { display: "flex", alignItems: "center", gap: 5, padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: ACCENT, color: "#fff" } },
+                        React.createElement(Icon.Panier, { size: 12, color: "#fff" }), "Encaisser"),
                     React.createElement("button", { onClick: () => apercuDevis(d, showToast), title: "Voir le PDF", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: LINE, color: TEXT } }, "Voir"),
-                    React.createElement("button", { onClick: () => envoyerDevis(d, showToast), title: "Renvoyer au client", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer"),
+                    React.createElement("button", { onClick: () => envoyerDevis(d, showToast), title: "Renvoyer au client", style: { padding: "8px 12px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Envoyer"),
                     React.createElement("button", { onClick: () => setASupprimer(d), title: "Supprimer ce devis", style: { width: 32, height: 32, borderRadius: 999, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: `1px solid ${LINE}` } },
                         React.createElement(Icon.Trash, { size: 14, color: "#E86A5C" })))))
             : React.createElement("div", null,

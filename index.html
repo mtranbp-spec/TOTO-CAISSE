@@ -303,6 +303,9 @@ const Icon = {
     Loupe: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("circle", { cx: "11", cy: "11", r: "7", stroke: p.color || "#fff", strokeWidth: "2" }),
         React.createElement("path", { d: "m20 20-3.6-3.6", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" })),
+    Client: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
+        React.createElement("path", { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round" }),
+        React.createElement("circle", { cx: "12", cy: "7", r: "4", stroke: p.color || "#fff", strokeWidth: "2" })),
     Panier: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
         React.createElement("path", { d: "M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z M3 6h18 M16 10a4 4 0 0 1-8 0", stroke: p.color || "#fff", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" })),
     Export: (p) => React.createElement("svg", { width: p.size || 14, height: p.size || 14, viewBox: "0 0 24 24", fill: "none" },
@@ -1644,6 +1647,8 @@ function App() {
     const [reorderPos, setReorderPos] = useState(false);
     const [quotes, setQuotes] = useState([]);
     const [devisAEncaisser, setDevisAEncaisser] = useState(null);
+    const [clientTicket, setClientTicket] = useState(null);
+    const [saisieClient, setSaisieClient] = useState(null);
     const [achats, setAchats] = useState([]);
     const [vendeurs, setVendeurs] = useState([]);
     // Le vendeur choisi est propre à l'appareil : la tablette de la caisse et
@@ -1876,6 +1881,10 @@ function App() {
             return;
         }
         setCart((prev) => (mode === "ajouter" ? [...prev, ...items] : items));
+        // Le client du devis suit jusqu'à la facture : c'est bien à lui qu'on
+        // vend, et il figurera sur le document.
+        if (devis.client && (devis.client.nom || devis.client.societe))
+            setClientTicket(devis.client);
         setView("pos");
         setDevisAEncaisser(null);
         showToast("Devis " + devis.numero + " chargé — " + items.length + " ligne" + (items.length > 1 ? "s" : ""));
@@ -2141,6 +2150,7 @@ function App() {
         const sale = {
             numero: numeroFactureSuivant(),
             vendeur: vendeur || "",
+            client: clientTicket || null,
             timestamp: now.toISOString(),
             dateKey: todayKey(),
             // On fige le taux dans la vente : un changement de TGC plus tard ne doit
@@ -2150,6 +2160,7 @@ function App() {
         };
         setCart([]);
         setPrixEnEdition(null);
+        setClientTicket(null);
         const db = getDb();
         if (db) {
             db.collection("sales").doc(saleId).set(sale).catch(() => {
@@ -2163,6 +2174,12 @@ function App() {
     }
     // Une vente enregistrée devient une facture : même document que le devis,
     // avec l'en-tête et les mentions adaptés.
+    function majClientVente(id, client) {
+        const db = getDb();
+        if (!db)
+            return Promise.reject(new Error("Pas de connexion."));
+        return db.collection("sales").doc(id).update({ client: client });
+    }
     function factureDepuisVente(v) {
         return {
             numero: v.numero || "Sans numéro",
@@ -2249,7 +2266,7 @@ function App() {
                     React.createElement(TabButton, { active: view === "achats", onClick: () => setView("achats"), icon: React.createElement(Icon.Panier, { size: 13 }) }, "Achats")),
                 React.createElement("button", { onClick: () => { const a = getAuth(); if (a) a.signOut(); }, title: "Verrouiller la caisse", style: { display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 999, background: PANEL } },
                     React.createElement(Icon.Lock, { size: 15, color: TEXT_MUTED })))),
-        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { annee: statsAnnee, setAnnee: setStatsAnnee, mois: statsMois, setMois: setStatsMois, anneesVentes: anneesVentes, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
+        view === "achats" ? (React.createElement(AchatsView, { achats: achats, saveAchat: saveAchat, deleteAchat: deleteAchat, showToast: showToast })) : view === "devis" ? (React.createElement(DevisView, { products: orderedProducts, colorOf: colorOf, showToast: showToast, quotes: quotes, saveQuote: saveQuote, deleteQuote: deleteQuote, versCaisse: (d) => (cart.length ? setDevisAEncaisser(d) : devisVersCaisse(d, "remplacer")) })) : view === "stats" ? (React.createElement(StatsView, { annee: statsAnnee, setAnnee: setStatsAnnee, mois: statsMois, setMois: setStatsMois, anneesVentes: anneesVentes, currentLabel: statsData.currentLabel, sousTitre: statsData.sousTitre, jourChoisi: jourChoisi, setJourChoisi: setJourChoisi, trend: statsData.trend, stats: periodStats, ventes: statsData.currentSales, showToast: showToast, factureDepuisVente: factureDepuisVente, produits: orderedProducts, majClientVente: majClientVente })) : view === "manage" ? (React.createElement(ManageView, { products: orderedProducts, categories: categories, catDocs: sortedCatDocs, editing: editing, form: form, setForm: setForm, formError: formError, setFormError: setFormError, ouvrirCameraEan: () => setCameraEan(true), openNewProduct: openNewProduct, openEditProduct: openEditProduct, submitProductForm: submitProductForm, deleteProduct: deleteProduct, closeForm: () => setEditing(null), catColor: colorOf, saveCategory: saveCategory, deleteCategory: deleteCategory, countIn: countIn, showToast: showToast, reorderProducts: reorderProducts, reorderCategories: reorderCategories })) : (React.createElement("div", { style: { display: "flex", flexWrap: "wrap" } },
             React.createElement("div", { className: "toto-pos-col", style: { flex: 1, minWidth: 280, padding: 16 } },
                 React.createElement(BarreDefilante, { actif: !reorderPos, style: { display: "flex", gap: 8, marginBottom: 16, overflowX: "auto", paddingBottom: 4, alignItems: "center" } },
                     React.createElement(CategoryTab, { label: "Toutes", active: activeCategory === "Toutes", color: TEXT_MUTED, onClick: () => setActiveCategory("Toutes") }),
@@ -2296,7 +2313,10 @@ function App() {
                                 React.createElement("option", { value: "" }, "Vendeur…"),
                                 vendeurs.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((v) => React.createElement("option", { key: v.id, value: v.name }, v.name))),
                             React.createElement("button", { onClick: () => setNouveauVendeur(""), title: "Nouveau vendeur", style: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: PANEL, border: `1px solid ${LINE}` } },
-                                React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED }))),
+                                React.createElement(Icon.Plus, { size: 13, color: TEXT_MUTED })),
+                            React.createElement("button", { onClick: () => setSaisieClient(clientTicket || { nom: "", societe: "", tel: "", email: "" }), title: "Client de ce ticket", style: { display: "flex", alignItems: "center", gap: 5, maxWidth: 130, padding: "7px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, background: clientTicket ? ACCENT : PANEL, color: clientTicket ? "#fff" : TEXT_MUTED, border: `1px solid ${clientTicket ? ACCENT : LINE}` } },
+                                React.createElement(Icon.Client, { size: 12, color: clientTicket ? "#fff" : TEXT_MUTED }),
+                                React.createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, clientTicket ? (clientTicket.societe || clientTicket.nom) : "Client"))),
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                         React.createElement(Icon.List, { size: 16, color: TEXT_MUTED }),
                         React.createElement("span", { className: "font-display", style: { fontSize: 14, color: TEXT } }, "Ticket"),
@@ -2343,6 +2363,15 @@ function App() {
                         React.createElement("div", { style: { display: "flex", gap: 6 } },
                             React.createElement("button", { onClick: () => setLibreTicket({ name: "", price: "", tgc: 6 }), className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED, border: `1px dashed ${LINE}` } }, "+ Divers"),
                             cart.length > 0 && React.createElement("button", { onClick: clearCart, className: "toto-vider", style: { flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Vider"))))))),
+        saisieClient && React.createElement("div", { onClick: () => setSaisieClient(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65, padding: 16, background: "rgba(0,0,0,0.55)" } },
+            React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
+                React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 4 } }, "Client de ce ticket"),
+                React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginBottom: 14 } }, "Facultatif. Renseigné, il apparaîtra sur la facture."),
+                ["societe", "nom", "tel", "email"].map((k) => React.createElement("div", { key: k },
+                    React.createElement("label", { style: { fontSize: 12, color: TEXT_MUTED } }, k === "societe" ? "Société" : k === "nom" ? "Nom du contact" : k === "tel" ? "Téléphone" : "E-mail"),
+                    React.createElement("input", { value: saisieClient[k] || "", autoFocus: k === "societe", onChange: (e) => setSaisieClient({ ...saisieClient, [k]: e.target.value }), inputMode: k === "tel" ? "tel" : k === "email" ? "email" : "text", style: { width: "100%", marginTop: 4, marginBottom: 10, padding: "10px 12px", borderRadius: 8, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` } }))),
+                React.createElement("button", { onClick: () => { const c = saisieClient; const vide = !((c.societe || "").trim() || (c.nom || "").trim()); setClientTicket(vide ? null : c); setSaisieClient(null); showToast(vide ? "Client retiré" : "Client enregistré sur le ticket"); }, className: "font-display", style: { width: "100%", padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Valider"),
+                clientTicket && React.createElement("button", { onClick: () => { setClientTicket(null); setSaisieClient(null); showToast("Client retiré"); }, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 13, background: "transparent", color: "#E86A5C" } }, "Retirer le client"))),
         devisAEncaisser && React.createElement("div", { onClick: () => setDevisAEncaisser(null), style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 65, padding: 16, background: "rgba(0,0,0,0.55)" } },
             React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 360, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 6 } }, "Un ticket est déjà en cours"),
@@ -2400,7 +2429,8 @@ function KpiCard({ label, value, color }) {
         React.createElement("div", { style: { fontSize: 11, marginBottom: 4, color: TEXT_MUTED } }, label),
         React.createElement("div", { className: "tabnum font-display", style: { fontSize: 18, color } }, value)));
 }
-function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel, sousTitre, jourChoisi, setJourChoisi, trend, stats, ventes, showToast, factureDepuisVente, produits }) {
+function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel, sousTitre, jourChoisi, setJourChoisi, trend, stats, ventes, showToast, factureDepuisVente, produits, majClientVente }) {
+    const [clientEnEdition, setClientEnEdition] = useState(null);
     const [exportEnCours, setExportEnCours] = useState(false);
     const [detail, setDetail] = useState(null);
     const ventesTriees = useMemo(() => (ventes || []).slice().sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || ""))), [ventes]);
@@ -2462,6 +2492,7 @@ function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel,
                         React.createElement("div", { style: { fontSize: 13, color: TEXT } }, v.numero || "Sans numéro"),
                         React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
                             [v.timestamp ? new Date(v.timestamp).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "",
+                                v.client ? (v.client.societe || v.client.nom) : null,
                                 v.vendeur || null,
                                 (v.items || []).length + " article" + ((v.items || []).length > 1 ? "s" : "")].filter(Boolean).join(" · "))),
                     React.createElement("span", { className: "tabnum", style: { fontSize: 14, fontWeight: 600, color: GOLD } }, fmt(v.total || 0)))))),
@@ -2479,6 +2510,16 @@ function StatsView({ annee, setAnnee, mois, setMois, anneesVentes, currentLabel,
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 } },
                     React.createElement("span", { className: "font-display", style: { fontSize: 13, color: TEXT_MUTED } }, "TOTAL TTC"),
                     React.createElement("span", { className: "tabnum font-display", style: { fontSize: 20, color: GOLD } }, fmt(detail.total || 0))),
+                clientEnEdition === null
+                    ? React.createElement("button", { onClick: () => setClientEnEdition(detail.client || { societe: "", nom: "", tel: "", email: "" }), style: { display: "flex", alignItems: "center", gap: 7, width: "100%", marginTop: 14, padding: "10px 12px", borderRadius: 10, fontSize: 12.5, textAlign: "left", background: BG, color: detail.client ? TEXT : TEXT_MUTED, border: `1px ${detail.client ? "solid" : "dashed"} ${LINE}` } },
+                        React.createElement(Icon.Client, { size: 13, color: detail.client ? ACCENT : TEXT_MUTED }),
+                        React.createElement("span", { style: { flex: 1 } }, detail.client ? (detail.client.societe || detail.client.nom) : "Aucun client — en ajouter un"),
+                        React.createElement(Icon.Pencil, { size: 12, color: TEXT_MUTED }))
+                    : React.createElement("div", { style: { marginTop: 14, padding: 12, borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
+                        React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 8 } }, "Client de cette vente"),
+                        ["societe", "nom", "tel", "email"].map((k) => React.createElement("input", { key: k, value: clientEnEdition[k] || "", autoFocus: k === "societe", onChange: (e) => setClientEnEdition({ ...clientEnEdition, [k]: e.target.value }), placeholder: k === "societe" ? "Société" : k === "nom" ? "Nom du contact" : k === "tel" ? "Téléphone" : "E-mail", style: { width: "100%", marginBottom: 7, padding: "8px 10px", borderRadius: 8, fontSize: 13, background: PANEL, color: TEXT, border: `1px solid ${LINE}` } })),
+                        React.createElement("button", { onClick: () => { const c = clientEnEdition; const vide = !((c.societe || "").trim() || (c.nom || "").trim()); majClientVente(detail.id, vide ? null : c).then(() => { setDetail({ ...detail, client: vide ? null : c }); setClientEnEdition(null); showToast(vide ? "Client retiré" : "Client enregistré"); }).catch((e) => showToast("⚠️ " + (e.message || "Enregistrement impossible"))); }, className: "font-display", style: { width: "100%", padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer le client"),
+                        React.createElement("button", { onClick: () => setClientEnEdition(null), style: { width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 10, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Annuler")),
                 React.createElement("button", { onClick: () => apercuDevis(factureDepuisVente(detail), showToast, "facture"), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer la facture"),
                 React.createElement("button", { onClick: () => envoyerDevis(factureDepuisVente(detail), showToast, "facture"), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer par mail")))));
 }

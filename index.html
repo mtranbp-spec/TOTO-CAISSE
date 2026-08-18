@@ -3751,7 +3751,9 @@ function statutReglement(v) {
         return { cle: "retard", label: "En retard", couleur: "#E86A5C" };
     if (totalRegle(v) > 0)
         return { cle: "partiel", label: "Partiel", couleur: GOLD };
-    return { cle: "attente", label: "À régler", couleur: TEXT_MUTED };
+    // Rouge sombre pour « à régler », rouge vif pour « en retard » : les deux
+    // se voient au premier coup d'œil, mais restent distincts l'un de l'autre.
+    return { cle: "attente", label: "À régler", couleur: ACCENT };
 }
 function joursDeRetard(v) {
     const ech = echeanceDe(v);
@@ -4055,7 +4057,16 @@ function ClientsView({ clients, quotes, sales, carnet, saveClient, deleteClient,
 /* ---------- Fiche d'un client ---------- */
 function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, busy, onFermer, onEnregistrer, onSupprimer, onReglement, onRecap, onRelancer, majPaiementVente, supprimerReglement, showToast, modale }) {
     const [onglet, setOnglet] = useState("infos");
+    // On ne retient que l'identifiant de la pièce ouverte, jamais sa copie :
+    // après un règlement, la fenêtre doit afficher le nouveau reste dû.
     const [pieceOuverte, setPieceOuverte] = useState(null);
+    const pieceVivante = useMemo(() => {
+        if (!pieceOuverte)
+            return null;
+        const source = pieceOuverte.genre === "devis" ? docs.devis : docs.ventes;
+        const doc = source.find((x) => x.id === pieceOuverte.id);
+        return doc ? { genre: pieceOuverte.genre, doc: doc } : null;
+    }, [pieceOuverte, docs]);
     const soldes = soldesClient(docs.ventes);
     const champ = { width: "100%", marginTop: 4, padding: "10px 12px", borderRadius: 10, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
     const etiquette = { fontSize: 12, color: TEXT_MUTED };
@@ -4093,14 +4104,14 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
             fiche.id && React.createElement("button", { onClick: onSupprimer, style: { width: "100%", marginTop: 8, padding: "10px 0", borderRadius: 12, fontSize: 12, background: "transparent", color: TEXT_MUTED } }, "Supprimer la fiche")),
         onglet === "histo" && React.createElement("div", { style: { display: "grid", gap: 8 } },
             docs.devis.length + docs.ventes.length === 0 && React.createElement("div", { style: { padding: 24, textAlign: "center", fontSize: 13, color: TEXT_MUTED } }, "Aucun devis ni vente pour ce client."),
-            docs.devis.map((d) => React.createElement("button", { key: "d" + d.id, onClick: () => setPieceOuverte({ genre: "devis", doc: d }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
+            docs.devis.map((d) => React.createElement("button", { key: "d" + d.id, onClick: () => setPieceOuverte({ genre: "devis", id: d.id }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8 } },
                     React.createElement("span", { style: { fontSize: 13, color: TEXT } }, "Devis " + (d.numero || "")),
                     React.createElement("span", { className: "tabnum", style: { fontSize: 13, color: TEXT } }, fmt(d.totalTTC || 0))),
                 React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginTop: 2 } }, [dateFr(d.createdAt), (d.lignes || []).length + " lignes", d.objet || null].filter(Boolean).join(" · ")))),
             docs.ventes.map((v) => {
                 const st = statutReglement(v);
-                return React.createElement("button", { key: "v" + v.id, onClick: () => setPieceOuverte({ genre: "facture", doc: v }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
+                return React.createElement("button", { key: "v" + v.id, onClick: () => setPieceOuverte({ genre: "facture", id: v.id }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${LINE}` } },
                     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8 } },
                         React.createElement("span", { style: { fontSize: 13, color: TEXT } }, "Facture " + (v.numero || "")),
                         React.createElement("span", { className: "tabnum", style: { fontSize: 13, color: TEXT } }, fmt(v.total || 0))),
@@ -4113,27 +4124,21 @@ function FicheClient({ fiche, form, setForm, docs, impayes, moisDisponibles, bus
             React.createElement("div", { style: { display: "grid", gap: 8 } }, impayes.map((v) => {
                 const st = statutReglement(v);
                 const retard = joursDeRetard(v);
-                return React.createElement("div", { key: v.id, style: { borderRadius: 12, padding: 13, background: PANEL, border: `1px solid ${st.cle === "retard" ? "#E86A5C" : LINE}` } },
+                return React.createElement("button", { key: v.id, onClick: () => setPieceOuverte({ genre: "facture", id: v.id }), style: { display: "block", width: "100%", textAlign: "left", borderRadius: 12, padding: "11px 13px", background: PANEL, border: `1px solid ${st.cle === "retard" ? "#E86A5C" : LINE}` } },
                     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 3 } },
                         React.createElement("span", { style: { fontSize: 13, color: TEXT } }, "Facture " + (v.numero || "")),
                         React.createElement("span", { className: "tabnum font-display", style: { fontSize: 15, color: st.couleur } }, fmt(resteDu(v)))),
-                    React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED, marginBottom: 8 } },
+                    React.createElement("div", { style: { fontSize: 11, color: TEXT_MUTED } },
                         [dateFr(v.timestamp), "total " + fmt(v.total || 0), totalRegle(v) > 0 ? "réglé " + fmt(totalRegle(v)) : null,
-                            retard > 0 ? retard + " j de retard" : "échéance " + dateFr(echeanceDe(v))].filter(Boolean).join(" · ")),
-                    (v.reglements || []).map((r, i) => React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: TEXT_MUTED, marginBottom: 4 } },
-                        React.createElement("span", null, dateFr(r.date) + " · " + (r.mode || "") + (r.note ? " · " + r.note : "")),
-                        React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } },
-                            React.createElement("span", { className: "tabnum" }, fmt(r.montant)),
-                            React.createElement("button", { onClick: () => supprimerReglement(v.id, i).then(() => showToast("Règlement retiré.")).catch((e) => showToast("⚠️ " + e.message)), title: "Retirer ce règlement", style: { display: "flex", padding: 2 } }, React.createElement(Icon.X, { size: 11, color: TEXT_MUTED }))))),
-                    React.createElement("button", { onClick: () => onReglement(v), className: "font-display", style: { width: "100%", marginTop: 6, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer un règlement"));
+                            retard > 0 ? retard + " j de retard" : "échéance " + dateFr(echeanceDe(v))].filter(Boolean).join(" · ")));
             }))),
-        pieceOuverte && React.createElement(DetailPiece, { piece: pieceOuverte, onFermer: () => setPieceOuverte(null), showToast: showToast }),
+        pieceVivante && React.createElement(DetailPiece, { piece: pieceVivante, onFermer: () => setPieceOuverte(null), showToast: showToast, onReglement: onReglement, supprimerReglement: supprimerReglement }),
         modale);
 }
 /* ---------- Détail d'une pièce de l'historique client ----------
    Même principe que le détail d'un ticket dans Stats : la liste reste sobre,
    et le détail complet n'apparaît qu'au clic. */
-function DetailPiece({ piece, onFermer, showToast }) {
+function DetailPiece({ piece, onFermer, showToast, onReglement, supprimerReglement }) {
     const estDevis = piece.genre === "devis";
     const doc = piece.doc;
     const lignes = estDevis ? (doc.lignes || []) : (doc.items || []);
@@ -4159,13 +4164,24 @@ function DetailPiece({ piece, onFermer, showToast }) {
                 React.createElement("span", { className: "font-display", style: { fontSize: 13, color: TEXT_MUTED } }, "TOTAL TTC"),
                 React.createElement("span", { className: "tabnum font-display", style: { fontSize: 20, color: GOLD } }, fmt(total))),
             // L'état du règlement n'a de sens que sur une facture portée au compte.
-            st && estSurCompte(doc) && React.createElement("div", { style: { marginTop: 10, padding: "9px 11px", borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
+            st && estSurCompte(doc) && React.createElement("div", { style: { marginTop: 10, padding: "10px 11px", borderRadius: 10, background: BG, border: `1px solid ${LINE}` } },
                 React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED } },
+                    React.createElement("span", null, "Échéance"),
+                    React.createElement("span", null, dateFr(echeanceDe(doc)) + (joursDeRetard(doc) > 0 ? " · " + joursDeRetard(doc) + " j de retard" : ""))),
+                (doc.reglements || []).length > 0 && React.createElement("div", { style: { marginTop: 8, paddingTop: 8, borderTop: `1px solid ${LINE}` } },
+                    (doc.reglements || []).map((r, i) => React.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: TEXT_MUTED, marginBottom: 4 } },
+                        React.createElement("span", null, dateFr(r.date) + " · " + (r.mode || "") + (r.note ? " · " + r.note : "")),
+                        React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } },
+                            React.createElement("span", { className: "tabnum" }, fmt(r.montant)),
+                            supprimerReglement && React.createElement("button", { onClick: () => supprimerReglement(doc.id, i).then(() => showToast("Règlement retiré.")).catch((e) => showToast("⚠️ " + e.message)), title: "Retirer ce règlement", style: { display: "flex", padding: 2 } },
+                                React.createElement(Icon.X, { size: 11, color: TEXT_MUTED })))))),
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, color: TEXT_MUTED, marginTop: 8 } },
                     React.createElement("span", null, "Déjà réglé"),
                     React.createElement("span", { className: "tabnum" }, fmt(totalRegle(doc)))),
-                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, marginTop: 4, color: st.couleur } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 600, marginTop: 4, color: st.couleur } },
                     React.createElement("span", null, st.label),
                     React.createElement("span", { className: "tabnum" }, fmt(resteDu(doc))))),
+            onReglement && estSurCompte(doc) && resteDu(doc) > 0 && React.createElement("button", { onClick: () => onReglement(doc), className: "font-display", style: { width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Enregistrer un règlement"),
             React.createElement("button", { onClick: () => apercuDevis(pdf, showToast, typePdf), style: { width: "100%", marginTop: 16, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "transparent", color: TEXT, border: `1px solid ${LINE}` } }, "Voir / Imprimer"),
             React.createElement("button", { onClick: () => envoyerDevis(pdf, showToast, typePdf), className: "font-display", style: { width: "100%", marginTop: 8, padding: "12px 0", borderRadius: 12, fontSize: 14, fontWeight: 600, background: ACCENT_GREEN, color: "#fff" } }, "Envoyer au client")));
 }
@@ -4178,7 +4194,8 @@ function ModaleReglement({ vente, onFermer, onValider }) {
     const [note, setNote] = useState("");
     const n = parseFloat(String(montant).replace(",", ".")) || 0;
     const champ = { width: "100%", marginTop: 4, padding: "11px 12px", borderRadius: 10, fontSize: 14, background: BG, color: TEXT, border: `1px solid ${LINE}` };
-    return React.createElement("div", { onClick: onFermer, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 16, background: "rgba(0,0,0,0.6)" } },
+    // Au-dessus du détail de la facture, d'où on l'ouvre le plus souvent.
+    return React.createElement("div", { onClick: onFermer, style: { position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 90, padding: 16, background: "rgba(0,0,0,0.6)" } },
         React.createElement("div", { onClick: (e) => e.stopPropagation(), style: { width: "100%", maxWidth: 340, borderRadius: 16, padding: 20, background: PANEL, border: `1px solid ${LINE}` } },
             React.createElement("div", { className: "font-display", style: { fontSize: 16, color: TEXT, marginBottom: 2 } }, "Règlement"),
             React.createElement("div", { style: { fontSize: 12, color: TEXT_MUTED, marginBottom: 14 } }, "Facture " + (vente.numero || "") + " · reste dû " + fmt(reste)),

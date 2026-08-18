@@ -506,7 +506,9 @@ async function dessinerPiece(doc, devis, type, avecBanque) {
     y += 7;
     // --- Encadrés client et devis ---
     // 30 mm : societe + contact + telephone + e-mail tiennent sans troncature.
-    const hBloc = 30, milieu = M + 88;
+    // Une facture non soldée affiche trois lignes de plus : on agrandit
+    // l'encadré plutôt que de laisser le texte déborder du cadre.
+    const hBloc = (estFacture && devis.acquittee === false) ? 37 : 30, milieu = M + 88;
     doc.setFillColor(245, 243, 240);
     doc.rect(M, y, 88, hBloc, "F");
     doc.setDrawColor(220, 218, 214);
@@ -557,7 +559,28 @@ async function dessinerPiece(doc, devis, type, avecBanque) {
         }
         doc.setFont("helvetica", "italic");
         doc.setFontSize(8.5);
-        doc.text(estReleve ? "Relevé des factures restant à régler." : "Facture acquittée. Merci de votre visite.", milieu + 4, yr);
+        if (estReleve) {
+            doc.text("Relevé des factures restant à régler.", milieu + 4, yr);
+        }
+        else if (devis.acquittee === false) {
+            // Facture portée au compte et non soldée : on annonce le reste dû
+            // et l'échéance plutôt qu'un acquittement mensonger.
+            doc.setTextColor(214, 31, 26);
+            doc.setFont("helvetica", "bold");
+            doc.text("À RÉGLER : " + fmtPdf(devis.resteDu || 0), milieu + 4, yr);
+            doc.setFont("helvetica", "italic");
+            doc.setTextColor(20, 20, 20);
+            yr += 4.2;
+            if (devis.dejaRegle > 0) {
+                doc.text("Déjà réglé : " + fmtPdf(devis.dejaRegle), milieu + 4, yr);
+                yr += 4.2;
+            }
+            if (devis.echeance)
+                doc.text("Échéance : " + new Date(devis.echeance + "T12:00:00").toLocaleDateString("fr-FR"), milieu + 4, yr);
+        }
+        else {
+            doc.text("Facture acquittée. Merci de votre visite.", milieu + 4, yr);
+        }
     }
     else {
         doc.setFont("helvetica", "italic");
@@ -2466,8 +2489,12 @@ function App() {
         const idFinal = id || ("c" + Date.now() + Math.random().toString(36).slice(2, 5));
         if (!id)
             donnees.createdAt = new Date().toISOString();
+        // On distingue les deux écritures : sans ça, un refus sur le
+        // rattachement passerait pour un refus sur la fiche elle-même.
         return db.collection("clients").doc(idFinal).set(donnees)
-            .then(() => rattacherPieces(idFinal, [cleNouvelle].concat(alias)))
+            .catch((e) => { throw new Error(e && e.code === "permission-denied" ? "Règles Firestore : la collection « clients » n'est pas autorisée. Republie firestore.rules." : "Fiche non enregistrée : " + (e.message || "erreur")); })
+            .then(() => rattacherPieces(idFinal, [cleNouvelle].concat(alias))
+                .catch((e) => { throw new Error(e && e.code === "permission-denied" ? "Fiche enregistrée, mais le rattachement de l'historique a été refusé." : "Fiche enregistrée, historique non rattaché."); }))
             .then(() => idFinal);
     }
     // Inscrit l'identifiant du client sur ses devis et ventes, sans toucher aux
@@ -3676,11 +3703,19 @@ const DELAIS_PAIEMENT = [[0, "Comptant"], [15, "15 jours"], [30, "30 jours"], [4
 // l'en-tête et les mentions adaptés. Au niveau module, car la caisse, les stats
 // et les fiches clients en ont toutes besoin.
 function factureDepuisVente(v) {
+    // « Acquittée » n'est pas décoratif : c'est une reconnaissance de paiement.
+    // Une facture portée au compte et non soldée ne doit surtout pas la porter.
+    const surCompte = estSurCompte(v);
+    const reste = surCompte ? resteDu(v) : 0;
     return {
         numero: v.numero || "Sans numéro",
         createdAt: v.timestamp || new Date().toISOString(),
         client: v.client || {},
         vendeur: v.vendeur || "",
+        acquittee: !surCompte || reste <= 0,
+        resteDu: reste,
+        dejaRegle: surCompte ? totalRegle(v) : 0,
+        echeance: surCompte && reste > 0 ? echeanceDe(v) : "",
         lignes: (v.items || []).map((it) => ({ name: it.name, price: it.price, qty: it.qty, tgc: it.tgc || 0 })),
     };
 }
